@@ -1,0 +1,16 @@
+# Postgres local opcional, para desenvolver offline sem o Neon.
+# Uso: docker compose up -d  →  DATABASE_URL=postgresql://bot_cnpi:bot_cnpi@localhost:5432/bot_cnpi
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bot_cnpi
+      POSTGRES_PASSWORD: bot_cnpi
+      POSTGRES_DB: bot_cnpi
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

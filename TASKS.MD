@@ -8,7 +8,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 
 - [x] Inicializar o projeto Next.js (TypeScript, App Router).
 - [ ] Criar o projeto gratuito no Neon (Postgres) e configurar o Prisma apontando para ele (local pode usar Docker Compose se preferir testar offline).
-- [ ] Criar o schema inicial do Prisma com as 9 tabelas descritas no `CLAUDE.md` (Seção 4) — sem lógica de negócio ainda, só a estrutura.
+- [x] Criar o schema inicial do Prisma com as 9 tabelas descritas no `CLAUDE.md` (Seção 4) — sem lógica de negócio ainda, só a estrutura.
 - [ ] Criar o repositório no GitHub (privado ou público — ver Seção 3.1 do CLAUDE.md sobre o efeito disso nos minutos grátis do Actions) e confirmar que os workflows-base em `.github/workflows/` aparecem na aba Actions.
 - [ ] Gerar um GitHub Personal Access Token com escopo `actions:write` (ou usar um `GITHUB_TOKEN` de app) para o Next.js conseguir disparar o workflow `pepi-search.yml` via `workflow_dispatch`; guardar como variável de ambiente (`GITHUB_PAT`), nunca hardcoded.
 - [ ] Autenticação básica de usuário único (login simples; multiusuário fica para a Fase 8).

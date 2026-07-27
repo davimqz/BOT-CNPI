@@ -1,0 +1,193 @@
+// Schema inicial — estrutura das 9 tabelas do CLAUDE.md (Seção 4), sem lógica de negócio.
+// Ao alterar este schema, atualize também o quadro da Seção 4 do CLAUDE.md.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Fonte de dados de uma marca monitorada — decisão de arquitetura, ver CLAUDE.md Seção 2.
+enum FonteDados {
+  rpi
+  scraping
+}
+
+enum TipoBusca {
+  radical
+  exata
+}
+
+enum StatusPrazo {
+  pendente
+  cumprido
+  vencido
+}
+
+// Conta/dono da configuração (usuário único nesta versão; multiusuário só na Fase 8).
+model Usuario {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  nome      String
+  senhaHash String   @map("senha_hash")
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  clientes            Cliente[]
+  marcasMonitoradas   MarcaMonitorada[]
+  templates           Template[]
+  configuracoesAlerta ConfiguracaoAlerta[]
+
+  @@map("usuarios")
+}
+
+// Pessoas/empresas para quem uma marca é monitorada (dispensável no uso pessoal).
+model Cliente {
+  id        String   @id @default(cuid())
+  usuarioId String   @map("usuario_id")
+  nome      String
+  email     String?
+  whatsapp  String?
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  usuario Usuario           @relation(fields: [usuarioId], references: [id])
+  marcas  MarcaMonitorada[]
+
+  @@map("clientes")
+}
+
+model MarcaMonitorada {
+  id                    String     @id @default(cuid())
+  usuarioId             String     @map("usuario_id")
+  clienteId             String?    @map("cliente_id")
+  nome                  String
+  processo              String?
+  classeNcl             String?    @map("classe_ncl")
+  tipoBusca             TipoBusca  @default(radical) @map("tipo_busca")
+  similaridadeAtiva     Boolean    @default(false) @map("similaridade_ativa")
+  // Percentual 0-100; só relevante quando similaridadeAtiva = true (Fase 4).
+  similaridadeThreshold Int?       @map("similaridade_threshold")
+  fonteDados            FonteDados @default(rpi) @map("fonte_dados")
+  // Códigos de despacho que disparam alerta; vazio = todos os eventos.
+  eventosAlerta         String[]   @default([]) @map("eventos_alerta")
+  ativa                 Boolean    @default(true)
+  criadoEm              DateTime   @default(now()) @map("criado_em")
+
+  usuario   Usuario    @relation(fields: [usuarioId], references: [id])
+  cliente   Cliente?   @relation(fields: [clienteId], references: [id])
+  despachos Despacho[]
+
+  @@map("marcas_monitoradas")
+}
+
+// Movimentação capturada de uma edição da RPI (ou do pePI, na fonte scraping).
+model Despacho {
+  id             String   @id @default(cuid())
+  marcaId        String?  @map("marca_id")
+  edicaoRpiId    String?  @map("edicao_rpi_id")
+  processo       String
+  nomeMarca      String?  @map("nome_marca")
+  titular        String?
+  classeNcl      String?  @map("classe_ncl")
+  codigo         String
+  textoDespacho  String?  @map("texto_despacho")
+  dataPublicacao DateTime @map("data_publicacao")
+  criadoEm       DateTime @default(now()) @map("criado_em")
+
+  marca     MarcaMonitorada? @relation(fields: [marcaId], references: [id])
+  edicaoRpi EdicaoRpi?       @relation(fields: [edicaoRpiId], references: [id])
+  prazos    Prazo[]
+
+  @@index([processo])
+  @@index([codigo])
+  @@map("despachos")
+}
+
+// Prazo legal derivado de um despacho — regras só entram após validação oficial (CLAUDE.md Seção 5).
+model Prazo {
+  id         String      @id @default(cuid())
+  despachoId String      @map("despacho_id")
+  tipo       String
+  dataLimite DateTime    @map("data_limite")
+  status     StatusPrazo @default(pendente)
+  criadoEm   DateTime    @default(now()) @map("criado_em")
+
+  despacho Despacho @relation(fields: [despachoId], references: [id])
+
+  @@index([status, dataLimite])
+  @@map("prazos")
+}
+
+// Cache local de cada edição da RPI já processada.
+model EdicaoRpi {
+  id             String   @id @default(cuid())
+  numero         Int      @unique
+  dataPublicacao DateTime @map("data_publicacao")
+  processadoEm   DateTime @default(now()) @map("processado_em")
+
+  despachos Despacho[]
+
+  @@map("edicoes_rpi")
+}
+
+// Personalização de marca própria (white-label) — campos usados de fato só na Fase 7.
+model Template {
+  id              String   @id @default(cuid())
+  usuarioId       String   @unique @map("usuario_id")
+  nomeEscritorio  String?  @map("nome_escritorio")
+  telefone        String?
+  emailContato    String?  @map("email_contato")
+  site            String?
+  logoUrl         String?  @map("logo_url")
+  ocultarLogo     Boolean  @default(false) @map("ocultar_logo")
+  corDestaque     String?  @map("cor_destaque")
+  textoRodape     String?  @map("texto_rodape")
+  emailAssunto    String?  @map("email_assunto")
+  emailCabecalho  String?  @map("email_cabecalho")
+  emailTextoIntro String?  @map("email_texto_intro")
+  emailRodape     String?  @map("email_rodape")
+  assinatura      String?
+  atualizadoEm    DateTime @updatedAt @map("atualizado_em")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@map("templates")
+}
+
+// Canais habilitados e parâmetros de envio por usuário (Fase 6).
+model ConfiguracaoAlerta {
+  id                      String   @id @default(cuid())
+  usuarioId               String   @unique @map("usuario_id")
+  emailHabilitado         Boolean  @default(false) @map("email_habilitado")
+  whatsappHabilitado      Boolean  @default(false) @map("whatsapp_habilitado")
+  popupHabilitado         Boolean  @default(true) @map("popup_habilitado")
+  delayEmailMinutos       Int      @default(0) @map("delay_email_minutos")
+  intervaloWhatsappSeg    Int      @default(30) @map("intervalo_whatsapp_seg")
+  smtpHost                String?  @map("smtp_host")
+  smtpPorta               Int?     @map("smtp_porta")
+  smtpUsuario             String?  @map("smtp_usuario")
+  smtpSenha               String?  @map("smtp_senha")
+  smtpRemetente           String?  @map("smtp_remetente")
+  smtpCriptografia        String?  @map("smtp_criptografia")
+  atualizadoEm            DateTime @updatedAt @map("atualizado_em")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@map("configuracoes_alerta")
+}
+
+// Registro de cada rodada de busca/monitoramento, para auditoria e depuração.
+model LogExecucao {
+  id           String    @id @default(cuid())
+  tipo         String
+  status       String
+  mensagem     String?
+  detalhes     Json?
+  iniciadoEm   DateTime  @default(now()) @map("iniciado_em")
+  finalizadoEm DateTime? @map("finalizado_em")
+
+  @@index([tipo, iniciadoEm])
+  @@map("logs_execucao")
+}
