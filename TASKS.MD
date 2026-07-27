@@ -28,7 +28,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Implementar o parser do XML contra o schema validado no manual — começar por um subconjunto pequeno de campos (processo, marca, titular, classe NCL, código/texto de despacho) e expandir depois.
 - [x] Testar o parser contra pelo menos 2 edições reais baixadas, incluindo marcas com acentuação e caracteres especiais.
 - [x] Persistir cada edição processada em `edicoes_rpi` e cada despacho em `despachos`.
-- [ ] Preencher `references/despacho-codes.md` (dentro da skill) com os códigos reais confirmados, à medida que forem aparecendo nos dados de teste.
+- [x] Preencher `references/despacho-codes.md` (dentro da skill) com os códigos reais confirmados, à medida que forem aparecendo nos dados de teste.
 - [x] Implementar o script `npm run ingest:rpi` chamado pelo workflow `.github/workflows/rpi-ingestion.yml` — este arquivo já existe como esqueleto no repositório; o script é o que falta escrever.
 - [ ] Testar o workflow rodando manualmente pela aba Actions do GitHub (`workflow_dispatch` já está habilitado nele) antes de confiar no agendamento automático de terça-feira.
 - [ ] Confirmar que uma edição ainda não publicada (404 no download) faz o workflow terminar com sucesso e sem gravar nada, não falhar — o GitHub Actions vai re-rodar automaticamente na próxima janela agendada.
