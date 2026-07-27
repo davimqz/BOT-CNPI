@@ -1,0 +1,50 @@
+# Busca ao vivo no pePI sob demanda (ver CLAUDE.md Seção 3.1 e skill pepi-scraping-playbook).
+# Disparado pela API do Next.js via workflow_dispatch; o resultado é gravado no Postgres
+# associado ao job_id, e o frontend faz polling até aparecer.
+# Esqueleto da Fase 0 — o script `search:pepi` é implementado na Fase 2 do TASKS.md.
+name: Busca pePI
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'ID do job de busca criado pela API (linha na tabela de jobs)'
+        required: true
+        type: string
+      termo:
+        description: 'Termo buscado (nome da marca ou número de processo)'
+        required: true
+        type: string
+      tipo_busca:
+        description: 'Tipo de busca no pePI'
+        required: true
+        type: choice
+        options:
+          - radical
+          - exata
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Fase 2: descomentar quando o Playwright entrar como dependência.
+      # - name: Instalar navegador do Playwright
+      #   run: npx playwright install --with-deps chromium
+
+      - name: Buscar no pePI
+        run: npm run search:pepi --if-present
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JOB_ID: ${{ inputs.job_id }}
+          TERMO: ${{ inputs.termo }}
+          TIPO_BUSCA: ${{ inputs.tipo_busca }}

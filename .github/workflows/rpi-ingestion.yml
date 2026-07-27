@@ -1,0 +1,31 @@
+# Ingestão semanal da RPI (ver CLAUDE.md Seção 3.1 e skill rpi-ingestion-despachos).
+# Esqueleto da Fase 0 — o script `ingest:rpi` é implementado na Fase 1 do TASKS.md.
+name: Ingestão RPI
+
+on:
+  schedule:
+    # Terça-feira, 12:00 UTC (09:00 BRT) — a RPI é publicada toda terça.
+    # Gotcha: o GitHub desativa `schedule` em repositórios sem atividade há 60+ dias.
+    - cron: '0 12 * * 2'
+  workflow_dispatch: {}
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 404 no download da edição = "ainda não publicada": o script deve terminar
+      # com sucesso sem gravar nada (o agendamento tenta de novo na próxima terça).
+      - name: Ingerir edição da RPI
+        run: npm run ingest:rpi --if-present
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
