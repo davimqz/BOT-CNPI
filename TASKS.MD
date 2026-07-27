@@ -14,7 +14,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Autenticação básica de usuário único (login simples; multiusuário fica para a Fase 8).
 - [x] Configurar variáveis de ambiente (`.env.example` documentando cada uma, `.env` real fora do git) — incluindo `DATABASE_URL` (Neon) e `GITHUB_PAT`.
 - [ ] Configurar o mesmo `DATABASE_URL` como secret do repositório no GitHub (Settings → Secrets and variables → Actions), já que os workflows também precisam gravar no Neon.
-- [ ] Pipeline mínimo de CI (lint + typecheck) rodando em cada commit.
+- [x] Pipeline mínimo de CI (lint + typecheck) rodando em cada commit.
 
 **Critério de pronto**: projeto sobe localmente (`npm run dev`), banco conecta (Neon), login funciona com um usuário fixo, e os dois workflows aparecem (sem rodar ainda) na aba Actions do repositório.
 
