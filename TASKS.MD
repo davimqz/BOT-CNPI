@@ -22,7 +22,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 
 ## Fase 1 — Motor de dados RPI *(skill: `rpi-ingestion-despachos`)*
 
-- [ ] Localizar e salvar em `docs/` a versão vigente do manual oficial de layout XML da RPI Marcas.
+- [x] Localizar e salvar em `docs/` a versão vigente do manual oficial de layout XML da RPI Marcas.
 - [ ] Implementar função para determinar a edição atual/próxima (estimativa por incremento + confirmação por tentativa de download, conforme a skill).
 - [ ] Implementar download do ZIP de uma edição (`https://revistas.inpi.gov.br/txt/RM[N].zip`), com tratamento de 404 como "ainda não publicada" (não como erro fatal).
 - [ ] Implementar o parser do XML contra o schema validado no manual — começar por um subconjunto pequeno de campos (processo, marca, titular, classe NCL, código/texto de despacho) e expandir depois.
