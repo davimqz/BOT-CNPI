@@ -7,7 +7,8 @@ export default defineConfig({
     path: 'prisma/migrations',
   },
   datasource: {
-    // Neon em produção; Postgres do docker-compose.yml em dev offline.
-    url: process.env.DATABASE_URL ?? '',
+    // Usada só pelo CLI (migrate/studio). No Neon, migrations devem usar a conexão
+    // direta (host sem "-pooler"); o runtime usa a pooled via adapter em src/lib/db.ts.
+    url: process.env.DATABASE_URL_DIRECT ?? process.env.DATABASE_URL ?? '',
   },
 });
