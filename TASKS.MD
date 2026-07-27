@@ -32,7 +32,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Implementar o script `npm run ingest:rpi` chamado pelo workflow `.github/workflows/rpi-ingestion.yml` — este arquivo já existe como esqueleto no repositório; o script é o que falta escrever.
 - [ ] Testar o workflow rodando manualmente pela aba Actions do GitHub (`workflow_dispatch` já está habilitado nele) antes de confiar no agendamento automático de terça-feira.
 - [ ] Confirmar que uma edição ainda não publicada (404 no download) faz o workflow terminar com sucesso e sem gravar nada, não falhar — o GitHub Actions vai re-rodar automaticamente na próxima janela agendada.
-- [ ] Construir a tela "Histórico RPI": filtro por edição, busca por campo (ex: nome da marca), tabela com edição/data/processo/marca/titular/classe/código/despacho.
+- [x] Construir a tela "Histórico RPI": filtro por edição, busca por campo (ex: nome da marca), tabela com edição/data/processo/marca/titular/classe/código/despacho.
 
 **Critério de pronto**: disparar o workflow manualmente pelo GitHub processa uma edição real e ela aparece pesquisável no Histórico RPI.
 
