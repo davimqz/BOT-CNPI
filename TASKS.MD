@@ -12,7 +12,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [ ] Criar o repositório no GitHub (privado ou público — ver Seção 3.1 do CLAUDE.md sobre o efeito disso nos minutos grátis do Actions) e confirmar que os workflows-base em `.github/workflows/` aparecem na aba Actions.
 - [ ] Gerar um GitHub Personal Access Token com escopo `actions:write` (ou usar um `GITHUB_TOKEN` de app) para o Next.js conseguir disparar o workflow `pepi-search.yml` via `workflow_dispatch`; guardar como variável de ambiente (`GITHUB_PAT`), nunca hardcoded.
 - [x] Autenticação básica de usuário único (login simples; multiusuário fica para a Fase 8).
-- [ ] Configurar variáveis de ambiente (`.env.example` documentando cada uma, `.env` real fora do git) — incluindo `DATABASE_URL` (Neon) e `GITHUB_PAT`.
+- [x] Configurar variáveis de ambiente (`.env.example` documentando cada uma, `.env` real fora do git) — incluindo `DATABASE_URL` (Neon) e `GITHUB_PAT`.
 - [ ] Configurar o mesmo `DATABASE_URL` como secret do repositório no GitHub (Settings → Secrets and variables → Actions), já que os workflows também precisam gravar no Neon.
 - [ ] Pipeline mínimo de CI (lint + typecheck) rodando em cada commit.
 
