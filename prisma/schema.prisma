@@ -91,9 +91,10 @@ model Despacho {
   nomeMarca      String?  @map("nome_marca")
   titular        String?
   classeNcl      String?  @map("classe_ncl")
-  codigo         String
-  textoDespacho  String?  @map("texto_despacho")
-  dataPublicacao DateTime @map("data_publicacao")
+  codigo            String
+  textoDespacho     String?  @map("texto_despacho")
+  textoComplementar String?  @map("texto_complementar")
+  dataPublicacao    DateTime @map("data_publicacao")
   criadoEm       DateTime @default(now()) @map("criado_em")
 
   marca     MarcaMonitorada? @relation(fields: [marcaId], references: [id])

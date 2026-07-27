@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<revista numero="2898" data="21/07/2026">
+  <processo numero="944030084" data-deposito="09/06/2026">
+    <despachos>
+      <despacho codigo="IPAS009" nome="Publicação de pedido de registro para oposição (exame formal concluído)"/>
+    </despachos>
+    <titulares>
+      <titular nome-razao-social="AÇAÍ &amp; CIA COMÉRCIO LTDA" pais="BR" uf="SP"/>
+    </titulares>
+    <marca apresentacao="Mista" natureza="Produtos e/ou Serviço">
+      <nome>AÇAÍTERIA SÃO JOÃO</nome>
+    </marca>
+    <lista-classe-nice>
+      <classe-nice codigo="43">
+        <especificacao>Restaurantes;</especificacao>
+        <status>Pendente de exame</status>
+      </classe-nice>
+      <classe-nice codigo="35">
+        <especificacao>Comércio;</especificacao>
+        <status>Pendente de exame</status>
+      </classe-nice>
+    </lista-classe-nice>
+  </processo>
+  <processo numero="821331698">
+    <despachos>
+      <despacho codigo="IPAS270" nome="Deferimento da petição">
+        <texto-complementar>Texto descritivo do despacho</texto-complementar>
+      </despacho>
+    </despachos>
+    <procurador>Nome do Procurador do Pedido</procurador>
+  </processo>
+  <processo numero="912345675" data-deposito="01/02/2020" data-concessao="10/05/2022" data-vigencia="10/05/2032">
+    <despachos>
+      <despacho codigo="IPAS158" nome="Concessão de registro"/>
+      <despacho codigo="IPAS423" nome="Notificação de oposição"/>
+    </despachos>
+    <titulares>
+      <titular nome-razao-social="TITULAR UM SA" pais="BR" uf="RJ"/>
+      <titular nome-razao-social="TITULAR DOIS ME" pais="BR" uf="MG"/>
+    </titulares>
+    <marca apresentacao="Nominativa" natureza="De Serviço">
+      <nome>CORAÇÃO VALENTE</nome>
+    </marca>
+    <classe-nice codigo="41" edicao="10">
+      <especificacao>Educação;</especificacao>
+    </classe-nice>
+  </processo>
+</revista>

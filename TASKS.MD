@@ -23,10 +23,10 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 ## Fase 1 — Motor de dados RPI *(skill: `rpi-ingestion-despachos`)*
 
 - [x] Localizar e salvar em `docs/` a versão vigente do manual oficial de layout XML da RPI Marcas.
-- [ ] Implementar função para determinar a edição atual/próxima (estimativa por incremento + confirmação por tentativa de download, conforme a skill).
-- [ ] Implementar download do ZIP de uma edição (`https://revistas.inpi.gov.br/txt/RM[N].zip`), com tratamento de 404 como "ainda não publicada" (não como erro fatal).
-- [ ] Implementar o parser do XML contra o schema validado no manual — começar por um subconjunto pequeno de campos (processo, marca, titular, classe NCL, código/texto de despacho) e expandir depois.
-- [ ] Testar o parser contra pelo menos 2 edições reais baixadas, incluindo marcas com acentuação e caracteres especiais.
+- [x] Implementar função para determinar a edição atual/próxima (estimativa por incremento + confirmação por tentativa de download, conforme a skill).
+- [x] Implementar download do ZIP de uma edição (`https://revistas.inpi.gov.br/txt/RM[N].zip`), com tratamento de 404 como "ainda não publicada" (não como erro fatal).
+- [x] Implementar o parser do XML contra o schema validado no manual — começar por um subconjunto pequeno de campos (processo, marca, titular, classe NCL, código/texto de despacho) e expandir depois.
+- [x] Testar o parser contra pelo menos 2 edições reais baixadas, incluindo marcas com acentuação e caracteres especiais.
 - [ ] Persistir cada edição processada em `edicoes_rpi` e cada despacho em `despachos`.
 - [ ] Preencher `references/despacho-codes.md` (dentro da skill) com os códigos reais confirmados, à medida que forem aparecendo nos dados de teste.
 - [ ] Implementar o script `npm run ingest:rpi` chamado pelo workflow `.github/workflows/rpi-ingestion.yml` — este arquivo já existe como esqueleto no repositório; o script é o que falta escrever.
