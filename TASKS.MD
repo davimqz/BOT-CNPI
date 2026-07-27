@@ -27,9 +27,9 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Implementar download do ZIP de uma edição (`https://revistas.inpi.gov.br/txt/RM[N].zip`), com tratamento de 404 como "ainda não publicada" (não como erro fatal).
 - [x] Implementar o parser do XML contra o schema validado no manual — começar por um subconjunto pequeno de campos (processo, marca, titular, classe NCL, código/texto de despacho) e expandir depois.
 - [x] Testar o parser contra pelo menos 2 edições reais baixadas, incluindo marcas com acentuação e caracteres especiais.
-- [ ] Persistir cada edição processada em `edicoes_rpi` e cada despacho em `despachos`.
+- [x] Persistir cada edição processada em `edicoes_rpi` e cada despacho em `despachos`.
 - [ ] Preencher `references/despacho-codes.md` (dentro da skill) com os códigos reais confirmados, à medida que forem aparecendo nos dados de teste.
-- [ ] Implementar o script `npm run ingest:rpi` chamado pelo workflow `.github/workflows/rpi-ingestion.yml` — este arquivo já existe como esqueleto no repositório; o script é o que falta escrever.
+- [x] Implementar o script `npm run ingest:rpi` chamado pelo workflow `.github/workflows/rpi-ingestion.yml` — este arquivo já existe como esqueleto no repositório; o script é o que falta escrever.
 - [ ] Testar o workflow rodando manualmente pela aba Actions do GitHub (`workflow_dispatch` já está habilitado nele) antes de confiar no agendamento automático de terça-feira.
 - [ ] Confirmar que uma edição ainda não publicada (404 no download) faz o workflow terminar com sucesso e sem gravar nada, não falhar — o GitHub Actions vai re-rodar automaticamente na próxima janela agendada.
 - [ ] Construir a tela "Histórico RPI": filtro por edição, busca por campo (ex: nome da marca), tabela com edição/data/processo/marca/titular/classe/código/despacho.
