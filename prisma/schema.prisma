@@ -130,17 +130,26 @@ model Despacho {
   @@map("despachos")
 }
 
-// Prazo legal derivado de um despacho — regras só entram após validação oficial (CLAUDE.md Seção 5).
+// Prazo legal derivado de um despacho (Fase 5). As regras foram validadas contra a
+// LPI e o Manual de Marcas (CLAUDE.md Seção 5) — a tabela com o fundamento de cada
+// uma está em .claude/skills/rpi-ingestion-despachos/references/despacho-codes.md,
+// e o cálculo em src/lib/prazos.ts.
 model Prazo {
   id         String      @id @default(cuid())
   despachoId String      @map("despacho_id")
+  /// Slug de TipoPrazo (src/lib/prazos.ts), não o rótulo exibido: o texto da tela
+  /// pode ser reescrito sem migrar as linhas já gravadas.
   tipo       String
   dataLimite DateTime    @map("data_limite")
   status     StatusPrazo @default(pendente)
   criadoEm   DateTime    @default(now()) @map("criado_em")
 
-  despacho Despacho @relation(fields: [despachoId], references: [id])
+  despacho Despacho @relation(fields: [despachoId], references: [id], onDelete: Cascade)
 
+  /// Idempotência da ingestão: re-rodar uma edição recalcula o mesmo prazo em vez
+  /// de criar uma segunda linha. Um despacho pode ter mais de um prazo de tipos
+  /// diferentes (deferimento abre o pagamento ordinário e o extraordinário).
+  @@unique([despachoId, tipo])
   @@index([status, dataLimite])
   @@map("prazos")
 }

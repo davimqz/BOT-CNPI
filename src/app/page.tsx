@@ -36,6 +36,15 @@ export default function Home() {
             Cadastro das marcas acompanhadas a cada edição da RPI
           </span>
         </Link>
+        <Link
+          href="/prazos"
+          className="inline-block rounded border border-black/15 px-4 py-3 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+        >
+          <span className="block font-medium">Prazos INPI</span>
+          <span className="block text-sm opacity-70">
+            Prazos legais abertos pelos despachos das marcas monitoradas
+          </span>
+        </Link>
       </nav>
       <section className="space-y-2 text-sm opacity-80">
         <p>Próximos módulos, na ordem do TASKS.md:</p>

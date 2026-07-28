@@ -59,7 +59,7 @@ Evite depender de scraping do índice HTML (`revistas.inpi.gov.br/rpi/`) como ú
 2. Baixar o ZIP; se 404, aguardar e tentar novamente (não falhar o job inteiro).
 3. Descompactar e fazer o parse do XML contra o schema validado no manual.
 4. Para cada despacho novo: gravar em `despachos` (ver modelo de dados no CLAUDE.md do projeto), e cruzar contra `marcas_monitoradas` para saber se algum processo cadastrado teve movimentação. **Este cruzamento É o job de verificação da fonte `rpi`** — não existe um job agendado separado para isso, e criar um seria trabalho duplicado. Implementado em `src/workers/rpi/ingest.ts` sobre a lógica pura de `src/lib/verificacao.ts`; ver "Cruzamento contra marcas monitoradas" abaixo.
-5. Quando houver correspondência, gerar o registro de prazo (`prazos`) usando a tabela de `references/despacho-codes.md`, e disparar o pipeline de notificação (fora do escopo desta skill — ver módulo de notificações no CLAUDE.md).
+5. Quando houver correspondência, gerar o registro de prazo (`prazos`) usando a tabela de `references/despacho-codes.md` — implementado em `src/lib/prazos.ts` e chamado no fim do cruzamento. A regra de contagem (LPI arts. 221-224) e a invariante "a data calculada nunca passa do vencimento real" estão documentadas naquele arquivo; leia antes de mexer em qualquer data. Depois, disparar o pipeline de notificação (fora do escopo desta skill — ver módulo de notificações no CLAUDE.md).
 6. Gravar a edição inteira em `edicoes_rpi` / histórico local, mesmo os despachos que não bateram com nenhuma marca monitorada — isso é o que alimenta a busca do "Histórico RPI" depois.
 
 ## Cruzamento contra marcas monitoradas (confirmado ao vivo em 28/07/2026)
@@ -70,6 +70,27 @@ Regras de casamento, na ordem em que importam:
 - **Sem processo, casa por nome normalizado** (maiúsculas, sem acento, sem espaço/pontuação — "COCA-COLA" e "coca cola" precisam casar). Nome apenas *parecido* fica de fora: isso é o motor de similaridade da Fase 4, e misturar as duas coisas aqui esconde qual regra deixou passar o quê.
 - **A classe NCL da marca filtra, mas despacho sem classe não é descartado** — perder movimentação por campo vazio na revista é pior que um casamento a mais. Atenção: a RPI junta várias classes de um processo numa string só (`"35;41"`).
 - **O filtro de eventos escolhido pela marca decide o alerta, não o vínculo**: despacho que casa mas está fora dos eventos escolhidos é vinculado com `alerta_pendente = false`. O usuário continua vendo a movimentação no histórico; ele só não é notificado.
+
+### O nome da marca só vem em ALGUNS tipos de despacho (confirmado em 28/07/2026)
+
+Medido sobre as edições 2897-2899 (~113 mil despachos): o campo `<marca><nome>` só está
+preenchido em **publicação para oposição (IPAS009, 97%)**, **concessão (IPAS158, 89%)** e
+parcialmente em deferimento de petição (IPAS270, 37%). Vem **sempre vazio** em deferimento
+(IPAS029), indeferimento (IPAS024), exigência de mérito (IPAS136), exigência formal (IPAS005),
+notificação de oposição (IPAS423), de recurso (IPAS360), de caducidade (IPAS338), exigência de
+pagamento (IPAS395) e extinção (IPAS161) — zero de dezenas de milhares em cada um.
+
+Consequência direta, e ela é grande: **marca cadastrada SEM número de processo (que casa por
+nome) nunca vê um deferimento, indeferimento ou exigência.** Ela só enxerga a publicação para
+oposição e a concessão. Como quase todo prazo legal da Fase 5 nasce justamente dos despachos
+sem nome, na prática:
+
+> Para monitoramento de prazos, cadastrar a marca **com o número do processo** não é uma
+> preferência, é requisito. Sem ele o sistema mostra a marca sendo publicada e concedida, mas
+> silencia exatamente nos despachos que abrem prazo.
+
+Isso também explica por que o motor de similaridade (Fase 4) só acha colidência em IPAS009 e
+IPAS158 — e, para colidência, isso é adequado: a janela de oposição é justamente a do IPAS009.
 
 Duas coisas que só aparecem quando o sistema já está rodando:
 

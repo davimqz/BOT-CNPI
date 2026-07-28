@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { prisma } from '@/lib/db';
-import { cruzarDespachos } from '@/lib/verificacao';
+import type { Cruzamento, DespachoParaCruzamento } from '@/lib/verificacao';
+import { cruzarDespachos, motivoDoVinculo } from '@/lib/verificacao';
+import { prazosDoDespacho, statusPorData } from '@/lib/prazos';
 import { baixarEdicao } from './download';
 import { parseRevista } from './parse';
 
@@ -35,6 +37,55 @@ interface ResumoCruzamento {
   alertas: number;
   /** Quantos casaram por semelhança de nome (Fase 4), não pela própria marca. */
   colidencias: number;
+  /** Prazos legais derivados dos despachos casados (Fase 5). */
+  prazos: number;
+}
+
+/**
+ * Fase 5: converte os despachos recém-vinculados nos prazos que eles abrem.
+ *
+ * Só entra despacho que casou com marca monitorada — prazo de processo alheio
+ * não é prazo do usuário. O `motivo` vai junto porque numa colidência o único
+ * prazo cabível é o de oposição (ver prazosDoDespacho).
+ *
+ * `skipDuplicates` sobre a única (despacho, tipo) é o que torna seguro re-rodar
+ * uma edição ou usar o modo retroativo: um prazo já marcado como `cumprido` pelo
+ * usuário não volta para `pendente`.
+ */
+async function gerarPrazos(
+  cruzamentos: Cruzamento[],
+  despachos: DespachoParaCruzamento[],
+  dataPublicacao: Date,
+): Promise<number> {
+  const porId = new Map(despachos.map((d) => [d.id, d]));
+  const linhas = [];
+  for (const c of cruzamentos) {
+    const despacho = porId.get(c.despachoId);
+    if (!despacho) continue;
+    for (const prazo of prazosDoDespacho({
+      codigo: despacho.codigo,
+      dataPublicacao,
+      motivo: c.motivo,
+    })) {
+      linhas.push({
+        despachoId: despacho.id,
+        tipo: prazo.tipo,
+        dataLimite: prazo.dataLimite,
+        status: statusPorData(prazo.dataLimite),
+      });
+    }
+  }
+  if (linhas.length === 0) return 0;
+
+  let gravados = 0;
+  for (let i = 0; i < linhas.length; i += LOTE_INSERT) {
+    const r = await prisma.prazo.createMany({
+      data: linhas.slice(i, i + LOTE_INSERT),
+      skipDuplicates: true,
+    });
+    gravados += r.count;
+  }
+  return gravados;
 }
 
 /**
@@ -46,7 +97,10 @@ interface ResumoCruzamento {
  * e no modo retroativo (--recruzar, para marca cadastrada depois da ingestão)
  * garante que um alerta já enviado pela Fase 6 não volte para a fila.
  */
-async function cruzarComMonitoradas(edicaoId: string): Promise<ResumoCruzamento> {
+async function cruzarComMonitoradas(
+  edicaoId: string,
+  dataPublicacao: Date,
+): Promise<ResumoCruzamento> {
   const marcas = await prisma.marcaMonitorada.findMany({
     where: { ativa: true, fonteDados: 'rpi' },
     // Ordem estável: em caso de empate, a marca cadastrada primeiro fica com o despacho.
@@ -63,7 +117,7 @@ async function cruzarComMonitoradas(edicaoId: string): Promise<ResumoCruzamento>
   });
   if (marcas.length === 0) {
     console.log('[rpi] nenhuma marca monitorada de fonte rpi — nada a cruzar.');
-    return { marcasMonitoradas: 0, despachosCasados: 0, alertas: 0, colidencias: 0 };
+    return { marcasMonitoradas: 0, despachosCasados: 0, alertas: 0, colidencias: 0, prazos: 0 };
   }
 
   const despachos = await prisma.despacho.findMany({
@@ -108,9 +162,13 @@ async function cruzarComMonitoradas(edicaoId: string): Promise<ResumoCruzamento>
         `parecida com "${marca?.nome}"`,
     );
   }
+  const prazos = await gerarPrazos(cruzamentos, despachos, dataPublicacao);
+  if (prazos > 0) console.log(`[rpi] ${prazos} prazo(s) legal(is) gerado(s) — ver tela /prazos.`);
+
   return {
     marcasMonitoradas: marcas.length,
     despachosCasados: cruzamentos.length,
+    prazos,
     alertas,
     colidencias: porSimilaridade.length,
   };
@@ -173,7 +231,7 @@ async function ingerirEdicao(
 
   // Fora da transação de propósito: se o cruzamento falhar, a edição continua
   // gravada e pesquisável no Histórico RPI; basta re-rodar para refazer o vínculo.
-  return { status: 'ok', ...(await cruzarComMonitoradas(edicaoId)) };
+  return { status: 'ok', ...(await cruzarComMonitoradas(edicaoId, revista.dataPublicacao)) };
 }
 
 /**
@@ -186,7 +244,7 @@ async function recruzarEdicoes(quantidade: number): Promise<void> {
   const edicoes = await prisma.edicaoRpi.findMany({
     orderBy: { numero: 'desc' },
     take: quantidade,
-    select: { id: true, numero: true },
+    select: { id: true, numero: true, dataPublicacao: true },
   });
   if (edicoes.length === 0) {
     console.log('[rpi] nenhuma edição ingerida ainda — nada a recruzar.');
@@ -196,17 +254,88 @@ async function recruzarEdicoes(quantidade: number): Promise<void> {
   let casados = 0;
   let alertas = 0;
   let colidencias = 0;
+  let prazos = 0;
   for (const edicao of edicoes.reverse()) {
     console.log(`[rpi] recruzando edição ${edicao.numero}...`);
-    const r = await cruzarComMonitoradas(edicao.id);
+    const r = await cruzarComMonitoradas(edicao.id, edicao.dataPublicacao);
     casados += r.despachosCasados;
     alertas += r.alertas;
     colidencias += r.colidencias;
+    prazos += r.prazos;
   }
   console.log(
     `[rpi] recruzamento concluído: ${casados} despacho(s) vinculado(s), ${alertas} com alerta ` +
-      `pendente, ${colidencias} por semelhança de nome.`,
+      `pendente, ${colidencias} por semelhança de nome, ${prazos} prazo(s) gerado(s).`,
   );
+}
+
+/**
+ * Backfill de prazos: `npm run ingest:rpi -- --gerar-prazos[=N]`.
+ *
+ * O cruzamento só olha despacho AINDA SEM MARCA, então despacho vinculado antes
+ * da Fase 5 existir nunca passaria pelo gerador de prazos. Este modo percorre os
+ * despachos JÁ vinculados das N edições mais recentes e cria o que falta —
+ * `skipDuplicates` garante que rodar duas vezes não duplica nem reabre prazo já
+ * tratado pelo usuário.
+ */
+async function gerarPrazosRetroativo(quantidade: number): Promise<void> {
+  const edicoes = await prisma.edicaoRpi.findMany({
+    orderBy: { numero: 'desc' },
+    take: quantidade,
+    select: { id: true, numero: true, dataPublicacao: true },
+  });
+  if (edicoes.length === 0) {
+    console.log('[rpi] nenhuma edição ingerida ainda — nada a fazer.');
+    return;
+  }
+
+  const marcas = await prisma.marcaMonitorada.findMany({
+    select: {
+      id: true,
+      nome: true,
+      processo: true,
+      classeNcl: true,
+      eventosAlerta: true,
+      similaridadeAtiva: true,
+      similaridadeThreshold: true,
+    },
+  });
+  const porMarcaId = new Map(marcas.map((m) => [m.id, m]));
+
+  let total = 0;
+  for (const edicao of edicoes.reverse()) {
+    const despachos = await prisma.despacho.findMany({
+      where: { edicaoRpiId: edicao.id, marcaId: { not: null } },
+      select: {
+        id: true,
+        processo: true,
+        nomeMarca: true,
+        classeNcl: true,
+        codigo: true,
+        marcaId: true,
+      },
+    });
+    if (despachos.length === 0) continue;
+
+    // Reconstrói o motivo de cada vínculo: sem ele, uma colidência viraria prazo
+    // de pagamento/recurso de um processo que não é do usuário.
+    const cruzamentos: Cruzamento[] = [];
+    for (const d of despachos) {
+      const marca = porMarcaId.get(d.marcaId!);
+      if (!marca) continue;
+      cruzamentos.push({
+        despachoId: d.id,
+        marcaId: marca.id,
+        alerta: false, // irrelevante aqui: este modo não mexe na fila de alertas.
+        motivo: motivoDoVinculo(marca, d),
+      });
+    }
+
+    const gerados = await gerarPrazos(cruzamentos, despachos, edicao.dataPublicacao);
+    total += gerados;
+    console.log(`[rpi] edição ${edicao.numero}: ${gerados} prazo(s) novo(s).`);
+  }
+  console.log(`[rpi] backfill concluído: ${total} prazo(s) gerado(s).`);
 }
 
 async function main() {
@@ -227,6 +356,16 @@ async function main() {
     return;
   }
 
+  const flagPrazos = process.argv.slice(2).find((a) => a.startsWith('--gerar-prazos'));
+  if (flagPrazos) {
+    try {
+      await gerarPrazosRetroativo(Number(flagPrazos.split('=')[1]) || 4);
+    } finally {
+      await prisma.$disconnect();
+    }
+    return;
+  }
+
   const log = await prisma.logExecucao.create({
     data: { tipo: 'ingest_rpi', status: 'executando' },
   });
@@ -234,6 +373,7 @@ async function main() {
   let despachosCasados = 0;
   let alertas = 0;
   let colidencias = 0;
+  let prazos = 0;
 
   try {
     let alvo = await determinarProximaEdicao();
@@ -245,6 +385,7 @@ async function main() {
       despachosCasados += r.despachosCasados;
       alertas += r.alertas;
       colidencias += r.colidencias;
+      prazos += r.prazos;
     }
 
     await prisma.logExecucao.update({
@@ -252,9 +393,9 @@ async function main() {
       data: {
         status: 'sucesso',
         mensagem: processadas.length
-          ? `Edições processadas: ${processadas.join(', ')} — ${despachosCasados} despacho(s) de marcas monitoradas, ${alertas} com alerta, ${colidencias} por semelhança de nome`
+          ? `Edições processadas: ${processadas.join(', ')} — ${despachosCasados} despacho(s) de marcas monitoradas, ${alertas} com alerta, ${colidencias} por semelhança de nome, ${prazos} prazo(s) gerado(s)`
           : 'Nenhuma edição nova publicada',
-        detalhes: { processadas, despachosCasados, alertas, colidencias },
+        detalhes: { processadas, despachosCasados, alertas, colidencias, prazos },
         finalizadoEm: new Date(),
       },
     });

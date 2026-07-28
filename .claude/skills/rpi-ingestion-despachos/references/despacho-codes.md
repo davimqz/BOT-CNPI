@@ -5,9 +5,11 @@ RM2897 (14/07/2026) e RM2898 (21/07/2026) da RPI Marcas — extraídos pelo pipe
 deste projeto em 27/07/2026. O `nome` é o texto oficial publicado pelo próprio INPI no XML.
 
 **Regra desta tabela** (ver SKILL.md): só entra código visto em dado real ou no manual oficial.
-As colunas de prazo são hipóteses de trabalho baseadas na LPI (Lei 9.279/96) e **NÃO estão
-validadas** — a validação contra fonte oficial é a primeira tarefa da Fase 5 do TASKS.md.
-Nenhuma contagem de dias daqui pode ir para produção antes disso.
+
+**Status da validação de prazos: CONCLUÍDA em 28/07/2026** (primeira tarefa da Fase 5). Cada
+prazo abaixo foi conferido contra o texto integral da Lei 9.279/96 baixado do Planalto e contra
+o Manual de Marcas do INPI. O que não foi confirmado em fonte oficial **não entrou** na tabela
+de regras de `src/lib/prazos.ts` — e a ausência é deliberada, não esquecimento.
 
 ## Mapeamento código → evento de alerta da interface
 
@@ -27,19 +29,85 @@ Os 11 eventos que a interface expõe (ver SKILL.md) cobrem estes códigos:
 | Aguardando Exame | *(estado, não despacho — não aparece como código próprio nas edições analisadas)* |
 | Registro de Marca Vigente | *(estado, não despacho — idem)* |
 
-## Prazos candidatos (NÃO validados — Fase 5)
+## A regra de contagem (validada — é onde nasce o erro de prazo)
 
-| Código | Despacho | Tipo de prazo candidato | Contagem candidata | Status |
+A contagem **não** começa na data de publicação. Os quatro artigos que a definem, em conjunto:
+
+- **Art. 221** — "Os prazos estabelecidos nesta Lei são **contínuos**" → dias corridos, fim de
+  semana e feriado contam *dentro* do prazo.
+- **Art. 222** — "No cômputo dos prazos, **exclui-se o dia do começo** e inclui-se o do vencimento."
+- **Art. 223** — "Os prazos somente começam a correr a partir do **primeiro dia útil após a
+  intimação**, que será feita mediante publicação no órgão oficial do INPI."
+- **Art. 224** — "Não havendo expressa estipulação nesta Lei, o prazo para a prática do ato será
+  de 60 (sessenta) dias" (regra supletiva).
+
+Disso sai a fórmula implementada em `src/lib/prazos.ts`:
+
+```
+dia 1     = primeiro dia útil APÓS a data de publicação na RPI
+dataLimite = dia 1 + (N - 1) dias corridos
+```
+
+Conferida contra exemplo trabalhado publicado: publicação terça 10/06 → dia 1 = quarta 11/06 →
+dia 60 = sábado 09/08. O `-1` é o art. 222: o dia 1 já é o primeiro dia contado.
+
+### Duas divergências deliberadas em relação à letra da lei
+
+Ambas empurram a data calculada para **antes** do vencimento real, nunca depois. Essa é a
+invariante do módulo — *a data exibida nunca é mais tarde que a data legal*, porque errar para
+o lado "você tem mais tempo" é o único erro que faz o usuário perder o prazo:
+
+1. **Prorrogação de vencimento em dia não útil NÃO é aplicada.** A regra existe (prazo que vence
+   em sábado/domingo/feriado corre até o primeiro dia útil seguinte), mas aplicá-la exigiria o
+   calendário próprio do INPI e só serviria para dar ao usuário 1-3 dias a mais — exatamente a
+   direção perigosa. O prazo real é sempre ≥ o exibido.
+2. **Ponto facultativo (Carnaval, Corpus Christi) não entra na lista de dias não úteis**, só
+   feriado nacional estatutário + Sexta-feira Santa. Incluí-lo atrasaria o dia 1 e, com ele, o
+   vencimento. Excluí-lo antecipa — lado seguro.
+
+> Consequência prática a comunicar ao usuário: a data-limite deste sistema é um **piso seguro**,
+> não um substituto da consulta ao processo no INPI. Nenhuma tela deve apresentá-la como
+> certidão de prazo.
+
+## Prazos validados (fonte oficial — 28/07/2026)
+
+Base de contagem de todos: a data de publicação do despacho na RPI (art. 226 — os atos do INPI
+só produzem efeito a partir da publicação).
+
+| Código | Despacho | Tipo de prazo | Prazo | Fundamento (texto conferido) |
 |---|---|---|---|---|
-| IPAS009 | Publicação de pedido para oposição | Terceiros podem opor | 60 dias da publicação (LPI art. 158) | ⚠️ a validar |
-| IPAS423 | Notificação de oposição | Manifestação do titular | 60 dias da notificação (LPI art. 158 §1º) | ⚠️ a validar |
-| IPAS029 | Deferimento do pedido | Pagamento da concessão | 60 dias ordinário + 30 extraordinário (LPI art. 162) | ⚠️ a validar |
-| IPAS136 / IPAS267 | Exigência de mérito | Cumprimento de exigência | 60 dias (LPI art. 159 §1º… conferir) | ⚠️ a validar |
-| IPAS005 | Exigência formal | Cumprimento de exigência formal | 5 dias (LPI art. 157) | ⚠️ a validar |
-| IPAS024 | Indeferimento do pedido | Recurso | 60 dias (LPI art. 212) | ⚠️ a validar |
-| IPAS338 | Notificação de caducidade | Defesa/contestação | 60 dias (LPI art. 143 §…) | ⚠️ a validar |
-| IPAS400 / IPAS437 | Instauração de nulidade | Manifestação | 60 dias (LPI art. 170) | ⚠️ a validar |
-| IPAS158 | Concessão de registro | Vigência/renovação | 10 anos; renovação no último ano (LPI art. 133) | ⚠️ a validar |
+| IPAS009, IPAS756 | Publicação de pedido para oposição | Oposição de terceiros | 60 dias | art. 158, *caput* — "publicado para apresentação de oposição no prazo de 60 (sessenta) dias" |
+| IPAS423 | Notificação de oposição | Manifestação sobre a oposição | 60 dias | art. 158 §1º — "O depositante será intimado da oposição, podendo se manifestar no prazo de 60 (sessenta) dias" |
+| IPAS136, IPAS267, IPAS772 | Exigência de mérito | Cumprimento de exigência | 60 dias | art. 159 — "exigências, que deverão ser respondidas no prazo de 60 (sessenta) dias"; §1º: não respondida, arquivamento definitivo |
+| IPAS005 | Exigência formal | Cumprimento de exigência formal | **5 dias** | art. 157 — "exigências a serem cumpridas pelo depositante, em 5 (cinco) dias, sob pena de ser considerado inexistente" |
+| IPAS029, IPAS768, IPAS781 | Deferimento do pedido | Pagamento da concessão (ordinário) | 60 dias | art. 162 *caput* — "no prazo de 60 (sessenta) dias contados do deferimento" |
+| ⇡ mesmo despacho | ⇡ | Pagamento da concessão (extraordinário) | **90 dias** | art. 162 §único — "dentro de 30 (trinta) dias após o prazo previsto neste artigo", com retribuição específica, sob pena de arquivamento definitivo |
+| IPAS024, IPAS774 | Indeferimento do pedido | Recurso | 60 dias | art. 212 — "cabe recurso, que será interposto no prazo de 60 (sessenta) dias" |
+| IPAS360 | Notificação de recurso | Contrarrazões | 60 dias | art. 213 — "intimados para, no prazo de 60 (sessenta) dias, oferecerem contra-razões ao recurso" |
+| IPAS338 | Notificação de caducidade | Manifestação do titular | 60 dias | art. 143 §2º — "O titular será intimado para se manifestar no prazo de 60 (sessenta) dias, cabendo-lhe o ônus de provar o uso" |
+| IPAS400, IPAS437 | Instauração de processo de nulidade | Manifestação do titular | 60 dias | art. 170 — "O titular será intimado para se manifestar no prazo de 60 (sessenta) dias" |
+| IPAS395, IPAS089 | Exigência de pagamento | Cumprimento da exigência | 60 dias | art. 224 (**supletivo** — a LPI não fixa prazo próprio para este ato) |
+| IPAS158, IPAS770 | Concessão de registro | Prorrogação (ordinária) | **10 anos** | art. 133 — vigência de 10 anos da concessão; §1º: pedido "durante o último ano de vigência". Art. 163: concessão se reputa na data da publicação |
+| ⇡ mesmo despacho | ⇡ | Prorrogação (extraordinária) | **10 anos + 6 meses** | art. 133 §2º — "poderá fazê-lo nos 6 (seis) meses subseqüentes, mediante o pagamento de retribuição adicional" |
+
+Os prazos em **anos** (prorrogação) não passam pela regra do primeiro dia útil: o art. 133 conta
+da data da concessão, não de uma intimação a ser respondida.
+
+### Códigos deliberadamente SEM regra de prazo
+
+Não porque faltou pesquisar, mas porque não geram prazo para o titular monitorado:
+`IPAS270`/`IPAS271` (decisão de petição), `IPAS161`/`IPAS304` e demais extinções/arquivamentos
+(o prazo já se esgotou), `IPAS142`/`IPAS499` (sobrestamento suspende, não abre prazo),
+`IPAS235`/`IPAS237` e demais decisões de recurso (art. 215: "final e irrecorrível na esfera
+administrativa"), anotações da série `IPAS9xx`. Se algum precisar de regra, valide antes de
+adicionar — a regra desta tabela vale para prazos tanto quanto para códigos.
+
+### Colidência (marca de terceiro) gera só um prazo
+
+Quando o despacho chega à marca do usuário por **similaridade** (Fase 4), ele é de um processo
+de terceiro. O único prazo acionável nesse caso é opor-se: IPAS009/IPAS756 → 60 dias do art. 158.
+Gerar "pagamento da concessão" ou "recurso" a partir de um processo alheio seria dar ao usuário
+um prazo que não é dele. Ver `prazosDoDespacho` em `src/lib/prazos.ts`.
 
 ## Todos os códigos confirmados (83), por frequência nas edições 2897+2898
 

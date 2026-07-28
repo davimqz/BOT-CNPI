@@ -1,0 +1,56 @@
+# "Resumo por e-mail" dos prazos pendentes (Fase 5 do TASKS.md).
+#
+# Separado do rpi-ingestion.yml de propósito: a cadência de AVISAR é uma decisão
+# diferente da cadência de INGERIR. A RPI sai toda terça, mas um prazo de 5 dias
+# (exigência formal, LPI art. 157) publicado numa terça vence antes da terça
+# seguinte — um resumo só semanal deixaria o usuário sem aviso no meio da janela.
+#
+# O envio depende de SMTP configurado (secrets abaixo ou tela de alertas). Sem
+# SMTP o script avisa no log e termina com sucesso: falta de configuração de
+# e-mail não é motivo para o workflow ficar vermelho.
+name: Resumo de prazos
+
+on:
+  schedule:
+    # Gotcha: o GitHub desativa `schedule` em repositórios sem atividade há 60+ dias.
+    - cron: '0 11 * * 1-5' # dias úteis, 08:00 BRT
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: 'Janela em dias (padrão 30)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Só imprimir o resumo, sem enviar'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  resumo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Enviar resumo dos prazos pendentes
+        run: |
+          npm run resumo:prazos -- \
+            ${{ inputs.dias && format('--dias={0}', inputs.dias) || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_CRIPTOGRAFIA: ${{ secrets.SMTP_CRIPTOGRAFIA }}
+          RESUMO_PRAZOS_PARA: ${{ secrets.RESUMO_PRAZOS_PARA }}

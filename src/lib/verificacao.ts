@@ -111,6 +111,22 @@ export function casaComMarca(marca: MarcaParaCruzamento, despacho: DespachoParaC
 }
 
 /**
+ * Motivo de um vínculo despacho→marca JÁ GRAVADO no banco.
+ *
+ * O `motivo` não é persistido (ele é resultado do cruzamento, não estado), mas a
+ * geração retroativa de prazos precisa dele para não dar ao usuário um prazo de
+ * processo alheio. Reconstrói pelo mesmo critério do cruzamento: o que não casa
+ * exato só pode ter vindo da segunda passada, por similaridade.
+ */
+export function motivoDoVinculo(
+  marca: MarcaParaCruzamento,
+  despacho: DespachoParaCruzamento,
+): MotivoCruzamento {
+  if (!casaComMarca(marca, despacho)) return 'similaridade';
+  return marca.processo ? 'processo' : 'nome';
+}
+
+/**
  * Casamento por similaridade (Fase 4): o nome publicado é parecido o suficiente
  * com o da marca monitorada, no threshold dela. Vale só quando a marca tem
  * similaridade ligada, e a classe NCL continua filtrando — colidência é um
