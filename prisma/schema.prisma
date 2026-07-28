@@ -27,6 +27,13 @@ enum StatusPrazo {
   vencido
 }
 
+enum StatusJobBusca {
+  pendente
+  executando
+  sucesso
+  erro
+}
+
 // Conta/dono da configuração (usuário único nesta versão; multiusuário só na Fase 8).
 model Usuario {
   id        String   @id @default(cuid())
@@ -177,6 +184,27 @@ model ConfiguracaoAlerta {
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
   @@map("configuracoes_alerta")
+}
+
+// Job de busca ao vivo no pePI (Fase 2): a API cria a linha como `pendente`,
+// dispara o workflow pepi-search.yml via workflow_dispatch passando o id, e o
+// worker no GitHub Actions atualiza status/etapa/resultado; o frontend faz polling.
+model PepiSearchJob {
+  id           String         @id @default(cuid())
+  termo        String
+  tipoBusca    TipoBusca      @map("tipo_busca")
+  classeNcl    String?        @map("classe_ncl")
+  status       StatusJobBusca @default(pendente)
+  // Última etapa da automação ("acessando site", "extraindo resultados p.2"...),
+  // exibida pelo polling para o usuário nunca ficar sem feedback.
+  etapa        String?
+  resultado    Json?
+  erro         String?
+  criadoEm     DateTime       @default(now()) @map("criado_em")
+  finalizadoEm DateTime?      @map("finalizado_em")
+
+  @@index([status, criadoEm])
+  @@map("pepi_search_jobs")
 }
 
 // Registro de cada rodada de busca/monitoramento, para auditoria e depuração.

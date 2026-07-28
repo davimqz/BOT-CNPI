@@ -1,13 +1,13 @@
 ---
 name: pepi-scraping-playbook
-description: Use this skill whenever implementing, debugging, or discussing live/on-demand searches against the INPI's pePI system (gru.inpi.gov.br/pePI) — the "Radical/Exata" instant brand search, "busca por depositante/titular", or any feature that opens a real browser to query INPI in real time. Trigger for tasks involving Playwright/Selenium browser automation against a government site, session handling, pagination scraping, or when the user asks to "consultar o pePI", "buscar marca em tempo real", "buscar por titular/CNPJ", even without naming this skill.
+description: Use this skill whenever implementing, debugging, or discussing live/on-demand searches against the INPI's pePI system (busca.inpi.gov.br/pePI) — the "Radical/Exata" instant brand search, "busca por depositante/titular", or any feature that opens a real browser to query INPI in real time. Trigger for tasks involving Playwright/Selenium browser automation against a government site, session handling, pagination scraping, or when the user asks to "consultar o pePI", "buscar marca em tempo real", "buscar por titular/CNPJ", even without naming this skill.
 ---
 
 # Playbook de automação do pePI
 
 ## Por que isso existe — leia antes de escrever qualquer código de scraping
 
-Diferente da ingestão da RPI (veja a skill `rpi-ingestion-despachos`), **não existe API pública documentada do INPI para consulta de processo por processo em tempo real**. O único caminho oficial de acesso é a busca logada da base de marcas em `https://gru.inpi.gov.br/pePI/jsp/marcas/Pesquisa_num_processo.jsp`, feita por navegador. Isso significa que qualquer funcionalidade de consulta instantânea (busca por nome/processo, busca por depositante/titular) depende de automação de interface — não de uma chamada de API estável.
+Diferente da ingestão da RPI (veja a skill `rpi-ingestion-despachos`), **não existe API pública documentada do INPI para consulta de processo por processo em tempo real**. O único caminho oficial de acesso é a busca logada da base de marcas em `https://busca.inpi.gov.br/pePI/jsp/marcas/Pesquisa_num_processo.jsp`, feita por navegador. (Atenção: o host `gru.inpi.gov.br`, documentado em versões antigas deste playbook, passou a responder 404 em todas as rotas do pePI — confirmado em 28/07/2026; quem serve o sistema é `busca.inpi.gov.br`.) Isso significa que qualquer funcionalidade de consulta instantânea (busca por nome/processo, busca por depositante/titular) depende de automação de interface — não de uma chamada de API estável.
 
 **Trate esse componente como o elo mais frágil do sistema, não como a base dele.** Sempre que uma funcionalidade puder ser resolvida com os dados já ingeridos da RPI (ver skill `rpi-ingestion-despachos`) em vez de uma consulta ao vivo, prefira a RPI — é mais lenta para refletir mudanças (só atualiza semanalmente) mas muito mais estável e não depende de simular um navegador.
 
@@ -30,7 +30,7 @@ Diferente da ingestão da RPI (veja a skill `rpi-ingestion-despachos`), **não e
 
 Não invente seletores de memória — a estrutura real da página só pode ser confirmada inspecionando o site ao vivo (ex: com o Playwright em modo não-headless, ou via `page.content()` salvo para análise). Ao implementar:
 
-1. Rode uma sessão exploratória manual (ou com `codegen` do Playwright) contra `gru.inpi.gov.br/pePI` para mapear os seletores reais de: campo de busca, tipo de busca (Radical/Exata), paginação de resultados, e estrutura da tabela de resultados.
+1. Rode uma sessão exploratória manual (ou com `codegen` do Playwright) contra `busca.inpi.gov.br/pePI` para mapear os seletores reais de: campo de busca, tipo de busca (Radical/Exata), paginação de resultados, e estrutura da tabela de resultados. **Feito em 28/07/2026** — resultado consolidado em `src/workers/pepi/selectors.ts` (busca por nome fica em `Pesquisa_classe_basica.jsp`, radio `buscaExata` sim/não, resultados com paginação server-side por sessão via `Action=nextPageMarca`; a sessão anônima é criada pelo link "Continuar...." da página de entrada).
 2. Documente os seletores encontrados em um módulo próprio (ex: `pepi-selectors.ts`), com comentário da data em que foram confirmados — isso ajuda a saber rapidamente se algo quebrou por mudança recente do site.
 3. Escreva um teste de "sanidade" que roda a consulta mais simples possível (uma marca conhecida, tipo Exata) e falha alto e claro se a estrutura esperada não for encontrada — isso vira seu alarme de "o site mudou".
 

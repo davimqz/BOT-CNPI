@@ -37,12 +37,11 @@ jobs:
 
       - run: npm ci
 
-      # Fase 2: descomentar quando o Playwright entrar como dependência.
-      # - name: Instalar navegador do Playwright
-      #   run: npx playwright install --with-deps chromium
+      - name: Instalar navegador do Playwright
+        run: npx playwright install --with-deps chromium
 
       - name: Buscar no pePI
-        run: npm run search:pepi --if-present
+        run: npm run search:pepi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JOB_ID: ${{ inputs.job_id }}

@@ -57,6 +57,7 @@ Todo o stack acima cabe em tiers gratuitos para uso pessoal (um usuário, uma ma
 | `templates` | Configuração de marca própria por usuário: cores, logo, textos de relatório e e-mail, assinatura. |
 | `configuracoes_alerta` | Canais habilitados por usuário e parâmetros de delay/intervalo de envio. |
 | `logs_execucao` | Registro de cada rodada de busca/monitoramento, para auditoria e depuração. |
+| `pepi_search_jobs` | Job de busca ao vivo no pePI: criado `pendente` pela API, executado pelo workflow `pepi-search.yml`, consumido por polling do frontend (termo, tipo, status, etapa, resultado JSON). |
 
 Ao criar/alterar migrations, mantenha este quadro atualizado — ele é a referência rápida antes de abrir o schema do Prisma.
 

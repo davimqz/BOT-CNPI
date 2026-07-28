@@ -10,7 +10,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Criar o projeto gratuito no Neon (Postgres) e configurar o Prisma apontando para ele (local pode usar Docker Compose se preferir testar offline).
 - [x] Criar o schema inicial do Prisma com as 9 tabelas descritas no `CLAUDE.md` (Seção 4) — sem lógica de negócio ainda, só a estrutura.
 - [x] Criar o repositório no GitHub (privado ou público — ver Seção 3.1 do CLAUDE.md sobre o efeito disso nos minutos grátis do Actions) e confirmar que os workflows-base em `.github/workflows/` aparecem na aba Actions.
-- [ ] Gerar um GitHub Personal Access Token com escopo `actions:write` (ou usar um `GITHUB_TOKEN` de app) para o Next.js conseguir disparar o workflow `pepi-search.yml` via `workflow_dispatch`; guardar como variável de ambiente (`GITHUB_PAT`), nunca hardcoded.
+- [x] Gerar um GitHub Personal Access Token com escopo `actions:write` (ou usar um `GITHUB_TOKEN` de app) para o Next.js conseguir disparar o workflow `pepi-search.yml` via `workflow_dispatch`; guardar como variável de ambiente (`GITHUB_PAT`), nunca hardcoded.
 - [x] Autenticação básica de usuário único (login simples; multiusuário fica para a Fase 8).
 - [x] Configurar variáveis de ambiente (`.env.example` documentando cada uma, `.env` real fora do git) — incluindo `DATABASE_URL` (Neon) e `GITHUB_PAT`.
 - [x] Configurar o mesmo `DATABASE_URL` como secret do repositório no GitHub (Settings → Secrets and variables → Actions), já que os workflows também precisam gravar no Neon.
@@ -30,8 +30,8 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Persistir cada edição processada em `edicoes_rpi` e cada despacho em `despachos`.
 - [x] Preencher `references/despacho-codes.md` (dentro da skill) com os códigos reais confirmados, à medida que forem aparecendo nos dados de teste.
 - [x] Implementar o script `npm run ingest:rpi` chamado pelo workflow `.github/workflows/rpi-ingestion.yml` — este arquivo já existe como esqueleto no repositório; o script é o que falta escrever.
-- [ ] Testar o workflow rodando manualmente pela aba Actions do GitHub (`workflow_dispatch` já está habilitado nele) antes de confiar no agendamento automático de terça-feira.
-- [ ] Confirmar que uma edição ainda não publicada (404 no download) faz o workflow terminar com sucesso e sem gravar nada, não falhar — o GitHub Actions vai re-rodar automaticamente na próxima janela agendada.
+- [x] Testar o workflow rodando manualmente pela aba Actions do GitHub (`workflow_dispatch` já está habilitado nele) antes de confiar no agendamento automático de terça-feira.
+- [x] Confirmar que uma edição ainda não publicada (404 no download) faz o workflow terminar com sucesso e sem gravar nada, não falhar — o GitHub Actions vai re-rodar automaticamente na próxima janela agendada.
 - [x] Construir a tela "Histórico RPI": filtro por edição, busca por campo (ex: nome da marca), tabela com edição/data/processo/marca/titular/classe/código/despacho.
 
 **Critério de pronto**: disparar o workflow manualmente pelo GitHub processa uma edição real e ela aparece pesquisável no Histórico RPI.
@@ -40,9 +40,9 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 
 ## Fase 2 — Consulta manual *(skill: `pepi-scraping-playbook` + `branded-report-builder`)*
 
-- [ ] Sessão exploratória no pePI (`gru.inpi.gov.br/pePI`) com Playwright para mapear os seletores reais de busca, tipo de busca (Radical/Exata) e tabela de resultados.
-- [ ] Documentar os seletores confirmados em um módulo próprio, com data de confirmação.
-- [ ] Implementar o script `npm run search:pepi` chamado pelo workflow `.github/workflows/pepi-search.yml` (esqueleto já no repositório) — recebe `job_id`/`termo`/`tipo_busca` como inputs do `workflow_dispatch` e grava o resultado no Postgres associado ao `job_id`.
+- [x] Sessão exploratória no pePI com Playwright para mapear os seletores reais de busca, tipo de busca (Radical/Exata) e tabela de resultados — **atenção: o host mudou de `gru.inpi.gov.br` para `busca.inpi.gov.br`** (confirmado em 28/07/2026; script exploratório em `src/workers/pepi/explore.ts`).
+- [x] Documentar os seletores confirmados em um módulo próprio, com data de confirmação (`src/workers/pepi/selectors.ts`).
+- [x] Implementar o script `npm run search:pepi` chamado pelo workflow `.github/workflows/pepi-search.yml` (esqueleto já no repositório) — recebe `job_id`/`termo`/`tipo_busca` como inputs do `workflow_dispatch` e grava o resultado no Postgres associado ao `job_id` (tabela nova `pepi_search_jobs`, com coluna `etapa` atualizada em tempo real para o polling; teto de 30 páginas com flag `truncado`).
 - [ ] Implementar, no lado do Next.js, a rota de API que: cria uma linha de "job" pendente no banco, chama a API do GitHub para disparar `pepi-search.yml` passando esse `job_id`, e retorna o `job_id` pro frontend.
 - [ ] Implementar o polling no frontend: a tela de busca consulta o status do `job_id` a cada poucos segundos até o workflow terminar e o resultado aparecer (nunca deixe o usuário sem feedback nesse intervalo — mostrar algo como "consultando o INPI..." usando o mesmo espírito do log em tempo real do software de referência).
 - [ ] Implementar a tela de busca: campo nome/processo, Radical/Exata, filtro de classe NCL opcional.
