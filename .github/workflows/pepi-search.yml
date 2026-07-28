@@ -22,6 +22,7 @@ on:
         options:
           - radical
           - exata
+          - processo
 
 jobs:
   search:
@@ -39,6 +40,13 @@ jobs:
 
       - name: Instalar navegador do Playwright
         run: npx playwright install --with-deps chromium
+
+      # Falha alto se o pePI mudou de layout — nunca confiar em resultados de
+      # uma estrutura de página não reconhecida (skill pepi-scraping-playbook).
+      - name: Sanidade do pePI (estrutura da página)
+        run: npm run sanity:pepi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Buscar no pePI
         run: npm run search:pepi

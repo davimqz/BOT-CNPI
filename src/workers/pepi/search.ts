@@ -5,8 +5,8 @@
  * Entrada via env (inputs do workflow_dispatch):
  *   JOB_ID     — id da linha em pepi_search_jobs criada pela API (se não existir,
  *                cria uma a partir de TERMO/TIPO_BUSCA — útil para teste manual).
- *   TERMO      — nome da marca a buscar.
- *   TIPO_BUSCA — "radical" | "exata".
+ *   TERMO      — nome da marca (radical/exata) ou nº de processo (processo).
+ *   TIPO_BUSCA — "radical" | "exata" | "processo".
  *   CLASSE_NCL — opcional, filtro de classe.
  *
  * O resultado (linhas da tabela do pePI, todas as páginas) é gravado como JSON
@@ -21,6 +21,9 @@ import { PEPI } from './selectors';
 // pepi-scraping-playbook: nunca martelar o pePI em paralelo/sequência agressiva).
 const INTERVALO_ENTRE_PAGINAS_MS = 1500;
 const MAX_PAGINAS = 30;
+// O pePI pode levar bem mais que os 30s padrão para responder a uma consulta
+// (visto ao vivo em 28/07/2026: primeira busca da sessão levou ~20-40s).
+const TIMEOUT_CONSULTA_MS = 120_000;
 
 export interface ResultadoPepi {
   processo: string;
@@ -66,9 +69,9 @@ async function extrairResultadosDaPagina(page: Page): Promise<ResultadoPepi[]> {
   });
 }
 
-async function buscar(
+export async function buscar(
   termo: string,
-  exata: boolean,
+  tipo: 'radical' | 'exata' | 'processo',
   classeNcl: string | null,
   aoMudarEtapa: (etapa: string) => Promise<void>,
 ): Promise<{ resultados: ResultadoPepi[]; paginas: number; truncado: boolean }> {
@@ -78,7 +81,7 @@ async function buscar(
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     });
-    const page = await ctx.newPage();
+    let page = await ctx.newPage();
     page.setDefaultTimeout(30_000);
 
     await aoMudarEtapa('acessando site do INPI');
@@ -87,19 +90,38 @@ async function buscar(
     if ((await linkAnonimo.count()) === 0) {
       throw new SiteMudouError('acessando site', 'link de acesso anônimo ("Continuar....") ausente');
     }
-    await linkAnonimo.first().click();
+    // O link tem target="_blank": o login anônimo acontece numa ABA NOVA (mesmos
+    // cookies de sessão). Sem esperar essa aba carregar, a sessão ainda não está
+    // autenticada e qualquer JSP devolve a tela de login (visto em 28/07/2026).
+    const [abaLogin] = await Promise.all([
+      ctx.waitForEvent('page', { timeout: 15_000 }).catch(() => null),
+      linkAnonimo.first().click(),
+    ]);
+    if (abaLogin) {
+      page = abaLogin;
+      page.setDefaultTimeout(30_000);
+    }
     await page.waitForLoadState('domcontentloaded');
 
     await aoMudarEtapa('preenchendo busca');
-    await page.goto(`${PEPI.baseUrl}${PEPI.buscaPorMarca.url}`, { waitUntil: 'domcontentloaded' });
-    if ((await page.locator(PEPI.buscaPorMarca.form).count()) === 0) {
-      throw new SiteMudouError('preenchendo busca', `formulário ${PEPI.buscaPorMarca.form} ausente`);
+    if (tipo === 'processo') {
+      await page.goto(`${PEPI.baseUrl}${PEPI.buscaPorProcesso.url}`, { waitUntil: 'domcontentloaded' });
+      if ((await page.locator(PEPI.buscaPorProcesso.form).count()) === 0) {
+        throw new SiteMudouError('preenchendo busca', `formulário ${PEPI.buscaPorProcesso.form} ausente`);
+      }
+      await page.fill(PEPI.buscaPorProcesso.campoNumPedido, termo);
+      await page.click(PEPI.buscaPorProcesso.botaoPesquisar, { timeout: TIMEOUT_CONSULTA_MS });
+    } else {
+      await page.goto(`${PEPI.baseUrl}${PEPI.buscaPorMarca.url}`, { waitUntil: 'domcontentloaded' });
+      if ((await page.locator(PEPI.buscaPorMarca.form).count()) === 0) {
+        throw new SiteMudouError('preenchendo busca', `formulário ${PEPI.buscaPorMarca.form} ausente`);
+      }
+      await page.fill(PEPI.buscaPorMarca.campoMarca, termo);
+      await page.check(PEPI.buscaPorMarca.radioBuscaExata(tipo === 'exata'));
+      if (classeNcl) await page.fill(PEPI.buscaPorMarca.campoClasseNcl, classeNcl);
+      await page.selectOption(PEPI.buscaPorMarca.selectPorPagina, '100');
+      await page.click(PEPI.buscaPorMarca.botaoPesquisar, { timeout: TIMEOUT_CONSULTA_MS });
     }
-    await page.fill(PEPI.buscaPorMarca.campoMarca, termo);
-    await page.check(PEPI.buscaPorMarca.radioBuscaExata(exata));
-    if (classeNcl) await page.fill(PEPI.buscaPorMarca.campoClasseNcl, classeNcl);
-    await page.selectOption(PEPI.buscaPorMarca.selectPorPagina, '100');
-    await page.click(PEPI.buscaPorMarca.botaoPesquisar);
     await page.waitForLoadState('domcontentloaded');
 
     await aoMudarEtapa('extraindo resultados');
@@ -121,7 +143,7 @@ async function buscar(
       await aoMudarEtapa(`extraindo resultados (página ${pagina})`);
       await page.waitForTimeout(INTERVALO_ENTRE_PAGINAS_MS);
       // Paginação é estado de sessão no servidor — precisa navegar na mesma sessão.
-      await proxima.first().click();
+      await proxima.first().click({ timeout: TIMEOUT_CONSULTA_MS });
       await page.waitForLoadState('domcontentloaded');
       resultados.push(...(await extrairResultadosDaPagina(page)));
     }
@@ -149,7 +171,7 @@ async function main() {
     // Dispatch manual de teste pela aba Actions: cria o job a partir dos inputs.
     const termo = process.env.TERMO;
     const tipo = process.env.TIPO_BUSCA;
-    if (!termo || (tipo !== 'radical' && tipo !== 'exata')) {
+    if (!termo || (tipo !== 'radical' && tipo !== 'exata' && tipo !== 'processo')) {
       throw new Error(`Job ${jobId} não existe e TERMO/TIPO_BUSCA não permitem criá-lo.`);
     }
     job = await prisma.pepiSearchJob.create({
@@ -169,7 +191,7 @@ async function main() {
   try {
     const { resultados, paginas, truncado } = await buscar(
       job.termo,
-      job.tipoBusca === 'exata',
+      job.tipoBusca,
       job.classeNcl,
       aoMudarEtapa,
     );
@@ -197,7 +219,10 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error('[pepi] ERRO:', e);
-  process.exit(1);
-});
+// Guard para o sanity.ts poder importar buscar() sem disparar uma busca de job.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[pepi] ERRO:', e);
+    process.exit(1);
+  });
+}

@@ -11,7 +11,8 @@
     "postinstall": "prisma generate",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "ingest:rpi": "tsx src/workers/rpi/ingest.ts",
-    "search:pepi": "tsx src/workers/pepi/search.ts"
+    "search:pepi": "tsx src/workers/pepi/search.ts",
+    "sanity:pepi": "tsx src/workers/pepi/sanity.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

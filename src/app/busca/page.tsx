@@ -29,6 +29,7 @@ interface Resultado {
 }
 
 interface JobStatus {
+  jobId: string;
   status: 'pendente' | 'executando' | 'sucesso' | 'erro';
   etapa: string | null;
   resultado: Resultado | null;
@@ -37,8 +38,9 @@ interface JobStatus {
 
 export default function BuscaPage() {
   const [termo, setTermo] = useState('');
-  const [tipoBusca, setTipoBusca] = useState<'radical' | 'exata'>('radical');
+  const [tipoBusca, setTipoBusca] = useState<'radical' | 'exata' | 'processo'>('radical');
   const [classeNcl, setClasseNcl] = useState('');
+  const porProcesso = tipoBusca === 'processo';
   const [job, setJob] = useState<JobStatus | null>(null);
   const [buscando, setBuscando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
@@ -63,7 +65,11 @@ export default function BuscaPage() {
       const resp = await fetch('/api/busca', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ termo, tipoBusca, classeNcl: classeNcl || undefined }),
+        body: JSON.stringify({
+          termo,
+          tipoBusca,
+          classeNcl: porProcesso ? undefined : classeNcl || undefined,
+        }),
       });
       const data = (await resp.json()) as { jobId?: string; erro?: string };
       if (!resp.ok || !data.jobId) {
@@ -116,13 +122,17 @@ export default function BuscaPage() {
 
       <form onSubmit={buscar} className="mb-6 flex flex-wrap items-end gap-3 text-sm">
         <label className="block flex-1 basis-52">
-          <span className="mb-1 block opacity-70">Nome da marca</span>
+          <span className="mb-1 block opacity-70">
+            {porProcesso ? 'Nº do processo' : 'Nome da marca'}
+          </span>
           <input
             value={termo}
             onChange={(e) => setTermo(e.target.value)}
-            placeholder="ex: NATURA"
+            placeholder={porProcesso ? 'ex: 923456789 (só dígitos)' : 'ex: NATURA'}
             required
             minLength={2}
+            pattern={porProcesso ? '\\d{6,12}' : undefined}
+            title={porProcesso ? 'Apenas os dígitos do número do processo (6 a 12)' : undefined}
             disabled={buscando}
             className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
           />
@@ -130,7 +140,13 @@ export default function BuscaPage() {
         <fieldset className="block" disabled={buscando}>
           <span className="mb-1 block opacity-70">Tipo de busca</span>
           <div className="flex gap-3 rounded border border-black/20 px-3 py-1.5 dark:border-white/20">
-            {(['radical', 'exata'] as const).map((t) => (
+            {(
+              [
+                ['radical', 'Radical'],
+                ['exata', 'Exata'],
+                ['processo', 'Nº de processo'],
+              ] as const
+            ).map(([t, rotulo]) => (
               <label key={t} className="flex cursor-pointer items-center gap-1.5">
                 <input
                   type="radio"
@@ -138,22 +154,24 @@ export default function BuscaPage() {
                   checked={tipoBusca === t}
                   onChange={() => setTipoBusca(t)}
                 />
-                {t === 'radical' ? 'Radical' : 'Exata'}
+                {rotulo}
               </label>
             ))}
           </div>
         </fieldset>
-        <label className="block w-28">
-          <span className="mb-1 block opacity-70">Classe NCL</span>
-          <input
-            value={classeNcl}
-            onChange={(e) => setClasseNcl(e.target.value)}
-            placeholder="opcional"
-            pattern="\d{1,2}"
-            disabled={buscando}
-            className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
-          />
-        </label>
+        {!porProcesso && (
+          <label className="block w-28">
+            <span className="mb-1 block opacity-70">Classe NCL</span>
+            <input
+              value={classeNcl}
+              onChange={(e) => setClasseNcl(e.target.value)}
+              placeholder="opcional"
+              pattern="\d{1,2}"
+              disabled={buscando}
+              className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
+            />
+          </label>
+        )}
         <button
           type="submit"
           disabled={buscando}
@@ -189,15 +207,38 @@ export default function BuscaPage() {
 
       {resultado && (
         <>
-          <p className="mb-3 text-sm opacity-70">
-            {resultado.total.toLocaleString('pt-BR')} resultado(s) em {resultado.paginas} página(s)
-            do pePI.
-            {resultado.truncado && (
-              <span className="ml-2 text-amber-600 dark:text-amber-400">
-                Resultado truncado no limite de páginas — refine a busca (Exata ou classe NCL).
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm opacity-70">
+              {resultado.total.toLocaleString('pt-BR')} resultado(s) em {resultado.paginas}{' '}
+              página(s) do pePI.
+              {resultado.truncado && (
+                <span className="ml-2 text-amber-600 dark:text-amber-400">
+                  Resultado truncado no limite de páginas — refine a busca (Exata ou classe NCL).
+                </span>
+              )}
+            </p>
+            {job && (
+              <span className="flex gap-2">
+                <a
+                  href={`/api/busca/${job.jobId}/relatorio`}
+                  target="_blank"
+                  rel="noopener"
+                  className="rounded border border-black/20 px-3 py-1.5 text-sm font-medium hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+                >
+                  Relatório Consultor de Marca ↗
+                </a>
+                <a
+                  href={`/api/busca/${job.jobId}/relatorio?formato=pdf`}
+                  target="_blank"
+                  rel="noopener"
+                  title="Abre o relatório com o diálogo de impressão — escolha 'Salvar como PDF'"
+                  className="rounded border border-black/20 px-3 py-1.5 text-sm font-medium hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+                >
+                  PDF ↗
+                </a>
               </span>
             )}
-          </p>
+          </div>
           <div className="overflow-x-auto rounded border border-black/10 dark:border-white/15">
             <table className="w-full text-sm">
               <thead className="bg-black/5 text-left dark:bg-white/10">
@@ -229,7 +270,9 @@ export default function BuscaPage() {
                 {resultado.itens.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-3 py-8 text-center opacity-60">
-                      Nenhuma marca encontrada — bom sinal para um registro novo.
+                      {porProcesso
+                        ? 'Nenhum processo encontrado com esse número — confira os dígitos.'
+                        : 'Nenhuma marca encontrada — bom sinal para um registro novo.'}
                     </td>
                   </tr>
                 )}

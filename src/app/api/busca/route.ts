@@ -15,10 +15,20 @@ export async function POST(request: Request) {
   if (!termo || termo.length < 2) {
     return NextResponse.json({ erro: 'Informe um termo com pelo menos 2 caracteres' }, { status: 400 });
   }
-  if (body.tipoBusca !== 'radical' && body.tipoBusca !== 'exata') {
-    return NextResponse.json({ erro: 'tipoBusca deve ser "radical" ou "exata"' }, { status: 400 });
+  if (body.tipoBusca !== 'radical' && body.tipoBusca !== 'exata' && body.tipoBusca !== 'processo') {
+    return NextResponse.json(
+      { erro: 'tipoBusca deve ser "radical", "exata" ou "processo"' },
+      { status: 400 },
+    );
   }
-  const classeNcl = body.classeNcl?.trim() || null;
+  if (body.tipoBusca === 'processo' && !/^\d{6,12}$/.test(termo)) {
+    return NextResponse.json(
+      { erro: 'Para busca por processo, informe apenas os dígitos do número (6 a 12)' },
+      { status: 400 },
+    );
+  }
+  // Classe NCL só se aplica à busca por nome — o formulário de nº de processo não tem esse filtro.
+  const classeNcl = body.tipoBusca === 'processo' ? null : body.classeNcl?.trim() || null;
   if (classeNcl && !/^\d{1,2}$/.test(classeNcl)) {
     return NextResponse.json({ erro: 'Classe NCL deve ser um número de 1 a 45' }, { status: 400 });
   }

@@ -19,6 +19,7 @@ enum FonteDados {
 enum TipoBusca {
   radical
   exata
+  processo // busca por nº de processo/protocolo (Pesquisa_num_processo.jsp)
 }
 
 enum StatusPrazo {

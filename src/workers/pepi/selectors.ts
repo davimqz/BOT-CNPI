@@ -13,7 +13,12 @@
 export const PEPI = {
   baseUrl: 'https://busca.inpi.gov.br',
 
-  /** Página de entrada. O acesso anônimo é o link "Continuar...." (estabelece a sessão). */
+  /**
+   * Página de entrada. O acesso anônimo é o link "Continuar...." (estabelece a
+   * sessão). Gotcha (28/07/2026): o link tem target="_blank" — o login acontece
+   * numa aba nova; a navegação seguinte deve continuar NESSA aba, senão a sessão
+   * não está autenticada e todo JSP devolve a tela de login.
+   */
   entrada: {
     url: '/pePI/',
     linkAcessoAnonimo: 'a[href*="LoginController?action=login"]', // texto visível: "Continuar...."

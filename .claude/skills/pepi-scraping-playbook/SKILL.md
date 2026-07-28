@@ -32,7 +32,12 @@ Não invente seletores de memória — a estrutura real da página só pode ser 
 
 1. Rode uma sessão exploratória manual (ou com `codegen` do Playwright) contra `busca.inpi.gov.br/pePI` para mapear os seletores reais de: campo de busca, tipo de busca (Radical/Exata), paginação de resultados, e estrutura da tabela de resultados. **Feito em 28/07/2026** — resultado consolidado em `src/workers/pepi/selectors.ts` (busca por nome fica em `Pesquisa_classe_basica.jsp`, radio `buscaExata` sim/não, resultados com paginação server-side por sessão via `Action=nextPageMarca`; a sessão anônima é criada pelo link "Continuar...." da página de entrada).
 2. Documente os seletores encontrados em um módulo próprio (ex: `pepi-selectors.ts`), com comentário da data em que foram confirmados — isso ajuda a saber rapidamente se algo quebrou por mudança recente do site.
-3. Escreva um teste de "sanidade" que roda a consulta mais simples possível (uma marca conhecida, tipo Exata) e falha alto e claro se a estrutura esperada não for encontrada — isso vira seu alarme de "o site mudou".
+3. Escreva um teste de "sanidade" que roda a consulta mais simples possível (uma marca conhecida, tipo Exata) e falha alto e claro se a estrutura esperada não for encontrada — isso vira seu alarme de "o site mudou". **Feito em 28/07/2026** — `npm run sanity:pepi` (`src/workers/pepi/sanity.ts`), roda como passo do workflow `pepi-search.yml` antes de cada busca real.
+
+### Gotchas confirmados ao vivo (28/07/2026)
+
+- **O login anônimo abre uma ABA NOVA**: o link "Continuar...." tem `target="_blank"`. O `LoginController?action=login` roda na aba nova (mesmos cookies de contexto) — a automação precisa capturar essa aba (`context.waitForEvent('page')`) e continuar a navegação NELA. Se continuar na aba original, a sessão não está autenticada e qualquer JSP devolve a tela de login (`F_LoginCliente`) em vez do formulário de busca.
+- **Consultas podem passar de 30s**: a primeira busca de uma sessão levou 20-40s para responder. Use timeout de ~120s na submissão do formulário e nos cliques de paginação, não o padrão de 30s do Playwright.
 
 ## Funcionalidades que dependem deste playbook
 
