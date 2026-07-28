@@ -31,7 +31,7 @@ Sempre que estiver em dúvida sobre qual fonte usar para uma nova funcionalidade
 | Worker de scraping + ingestão RPI | **GitHub Actions**, não um processo Node separado | Roda em runner Ubuntu completo, sem o limite de 60s do Vercel Hobby. Ingestão da RPI via workflow agendado (`schedule`); busca ao vivo via workflow sob demanda (`workflow_dispatch`, disparado pela API do Next.js). Ver Seção 3.1 e skills `rpi-ingestion-despachos` / `pepi-scraping-playbook`. |
 | Banco de dados | PostgreSQL via Neon (free tier) + Prisma | Tipagem forte do modelo de dados (Seção 4) direto no TypeScript. Neon suspende sozinho quando ocioso — sem custo parado. |
 | Fila/agendamento | **Dispensada na variante gratuita** — opcional (BullMQ + Upstash Redis) só na Fase 8 (multiusuário) | O GitHub Actions já cumpre o papel de "fila": o agendamento roda o job da RPI, e o `workflow_dispatch` roda a busca sob demanda. Não adicione Redis/BullMQ antes de precisar de concorrência real entre vários usuários. |
-| E-mail | Nodemailer (SMTP configurável pelo usuário, ex: Gmail) | Espelha o comportamento do software de referência (cada usuário usa seu próprio SMTP) — grátis, sem serviço adicional. |
+| E-mail | **Resend** (API HTTP) como padrão; Nodemailer/SMTP como fallback | Ver Seção 3.2 — decisão revista em 28/07/2026. O usuário final não configura envio; a credencial é do operador. |
 | WhatsApp | Cloud API oficial da Meta (1.000 conversas de serviço grátis/mês) | **Não** usar automação de WhatsApp Web — ver justificativa na Seção 5. |
 | Armazenamento de arquivos | Bucket compatível com S3 | Logos e templates enviados pelo usuário (módulo de personalização) — só necessário a partir da Fase 7. |
 
@@ -44,6 +44,43 @@ Todo o stack acima cabe em tiers gratuitos para uso pessoal (um usuário, uma ma
 - Limites de referência (confirmados em julho de 2026, reconferir periodicamente pois tiers gratuitos mudam): Vercel Hobby (1M invocações/mês, função de até 60s), Neon free (0,5GB armazenamento, 100h de computação/mês, auto-suspende após 5 min ocioso), GitHub Actions (2.000 min grátis/mês em repositório privado, ilimitado em repositório público), Meta Cloud API (1.000 conversas de serviço grátis/mês).
 - **Monitoramento diário das marcas de fonte `scraping`**: workflow agendado (`.github/workflows/pepi-monitor.yml`), roda `npm run monitor:pepi` uma vez ao dia. As marcas de fonte `rpi` não passam por aqui — elas são cruzadas dentro do próprio `rpi-ingestion.yml`. Frequência fina ("a cada 15 minutos") não é possível nesta variante: `schedule` do GitHub é best-effort e cada marca abre um navegador contra o pePI.
 - Os três workflows (`rpi-ingestion.yml`, `pepi-search.yml`, `pepi-monitor.yml`) vivem em `.github/workflows/` — ver `TASKS.md` para o estado de cada fase.
+
+### 3.2 E-mail: por que Resend e não "cada usuário com seu SMTP" (revisto em 28/07/2026)
+
+A escolha original era Nodemailer com SMTP configurado pelo usuário, herdada do software de
+referência. **A herança foi do formato, não do motivo.** O "Vigia Marca" é um app desktop: não
+existe servidor dele no ar, então cada escritório *precisa* usar o próprio e-mail — não há
+alternativa técnica. Este sistema roda hospedado e tem servidor próprio, então essa restrição
+simplesmente não se aplica.
+
+O custo de manter a herança é alto e recai sobre quem menos pode pagá-lo. Para um usuário leigo,
+"configure seu SMTP" com Gmail significa: ativar 2FA → encontrar "Senhas de app" (que só aparece
+depois do 2FA) → gerar → colar uma string de 16 caracteres — e um erro de porta ou criptografia
+devolve `EAUTH`, que não diz nada a ele.
+
+**Decisão**: o envio é responsabilidade do operador, não do usuário final.
+
+- Chave do Resend em variável de ambiente / secret do repositório, **nunca no banco e nunca numa
+  tela de configuração** — ela autoriza envio pelo domínio inteiro.
+- O usuário final configura no máximo *para onde* receber; no uso pessoal, nem isso (sai de
+  `usuarios.email`).
+- SMTP continua implementado como fallback (`ConfigEmail` em `src/lib/email.ts`) para quem quiser
+  servidor próprio e para não ficar refém de um serviço externo.
+- Remetente em **subdomínio dedicado** (ex: `avisos@avisos.trilhafinance.com.br`): isola a
+  reputação de envio do domínio principal.
+
+Por que isso importa mais aqui que num app comum: **alerta de prazo que cai em spam equivale a
+alerta não enviado**, e o sistema inteiro existe para evitar prazo perdido. Deliverability é
+requisito funcional, não detalhe de infraestrutura.
+
+Alternativa descartada — **OAuth "Entrar com Google"**, que parece a melhor UX: enviar em nome do
+usuário exige o escopo restrito `gmail.send`, cuja publicação depende de auditoria de segurança
+(CASA). Em modo "Testing", que dispensa a auditoria, o refresh token **expira em 7 dias** — o job
+agendado pararia de enviar sozinho e em silêncio. É o pior modo de falhar para um sistema de
+prazos.
+
+Limites de referência (julho/2026, reconferir): Resend free 3.000 e-mails/mês (100/dia, 1
+domínio); Brevo free 300/dia. O volume real deste sistema é de dezenas de e-mails por mês.
 
 ## 4. Modelo de dados
 

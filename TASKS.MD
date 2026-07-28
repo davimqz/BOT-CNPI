@@ -100,8 +100,8 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 
 ## Fase 6 — Notificações
 
-- [ ] Implementar configuração de SMTP por usuário (servidor, porta, login, senha, remetente, criptografia) com botão de "enviar e-mail de teste".
-- [ ] Implementar envio de e-mail de alerta usando o template da skill `branded-report-builder` (assunto/cabeçalho/texto com variáveis `{marca}`/`{status}`/`{processo}`).
+- [x] ~~Implementar configuração de SMTP por usuário (servidor, porta, login, senha, remetente, criptografia)~~ **com botão de "enviar e-mail de teste"**. — **escopo revisto em 28/07/2026** (ver CLAUDE.md Seção 3.2): a configuração de SMTP por usuário foi *removida* do produto em vez de construída. Ela vinha do software de referência, que é desktop e não tem servidor próprio para enviar; num sistema hospedado, exigir host/porta/senha-de-app de um leigo é a parte mais frágil da experiência. O envio passou a ser **Resend por padrão**, com credencial do operador (variável de ambiente / secret, nunca no banco nem em tela), e SMTP mantido só como fallback opcional. Implementado em `src/lib/email.ts` (`ConfigEmail` escolhe o provedor; `montarPayloadResend` testável) e o "e-mail de teste" virou `npm run email:teste [destino]`, que valida o canal isoladamente do conteúdo. **Falta a você**: verificar o domínio no Resend e cadastrar `RESEND_API_KEY`/`EMAIL_REMETENTE` como secrets.
+- [ ] Implementar envio de e-mail de alerta usando o template da skill `branded-report-builder` (assunto/cabeçalho/texto com variáveis `{marca}`/`{status}`/`{processo}`) — consumindo a fila `despachos.alerta_pendente` que as Fases 3-4 já preenchem. A camada de envio já está pronta (`enviarEmail`); falta o template do alerta e o worker que esvazia a fila.
 - [ ] Implementar delay configurável antes do envio do e-mail (0 = imediato).
 - [ ] Registrar processo de aprovação da Cloud API da Meta (conta comercial, número verificado, template de mensagem aprovado) — este passo tem lead time externo, iniciar cedo.
 - [ ] Implementar envio de WhatsApp via Cloud API oficial (não WhatsApp Web) uma vez aprovado.

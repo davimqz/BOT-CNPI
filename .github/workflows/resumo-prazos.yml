@@ -47,6 +47,11 @@ jobs:
             ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Provedor padrão. Bastam estes dois secrets para o envio funcionar.
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          EMAIL_RESPONDER_PARA: ${{ secrets.EMAIL_RESPONDER_PARA }}
+          # Fallback: só entra em ação se os dois acima estiverem vazios.
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}

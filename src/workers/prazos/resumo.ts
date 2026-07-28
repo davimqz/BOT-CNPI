@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { prisma } from '@/lib/db';
 import { listarPrazos } from '@/lib/prazos-consulta';
 import { gerarResumoPrazos } from '@/lib/relatorio/resumo-prazos';
-import { carregarConfigSmtp, destinatarioPadrao, enviarEmail } from '@/lib/email';
+import { carregarConfigEmail, descreverConfig, destinatarioPadrao, enviarEmail } from '@/lib/email';
 
 /**
  * "Resumo por e-mail" dos prazos pendentes (Fase 5).
@@ -53,10 +53,10 @@ async function main() {
     return;
   }
 
-  const config = await carregarConfigSmtp();
+  const config = await carregarConfigEmail();
   if (!config) {
     console.warn(
-      '[prazos] SMTP não configurado (configuracoes_alerta ou SMTP_HOST/SMTP_REMETENTE) — ' +
+      '[prazos] envio de e-mail não configurado (RESEND_API_KEY + EMAIL_REMETENTE, ou SMTP) — ' +
         'resumo gerado mas não enviado.',
     );
     return;
@@ -68,7 +68,7 @@ async function main() {
   }
 
   await enviarEmail({ para, assunto: resumo.assunto, html: resumo.html, texto: resumo.texto }, config);
-  console.log(`[prazos] resumo enviado para ${para}.`);
+  console.log(`[prazos] resumo enviado para ${para} via ${descreverConfig(config)}.`);
 }
 
 main()
