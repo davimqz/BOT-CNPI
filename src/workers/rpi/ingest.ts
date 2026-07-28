@@ -80,6 +80,13 @@ async function ingerirEdicao(numero: number): Promise<'ok' | 'nao-publicada'> {
 }
 
 async function main() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL não definida. No GitHub Actions, confira se o Repository secret ' +
+        'DATABASE_URL existe (Settings → Secrets and variables → Actions → aba Secrets).',
+    );
+  }
+
   const log = await prisma.logExecucao.create({
     data: { tipo: 'ingest_rpi', status: 'executando' },
   });
