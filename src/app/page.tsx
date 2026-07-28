@@ -27,12 +27,21 @@ export default function Home() {
             Busca ao vivo na base de marcas do INPI (Radical/Exata)
           </span>
         </Link>
+        <Link
+          href="/marcas"
+          className="inline-block rounded border border-black/15 px-4 py-3 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+        >
+          <span className="block font-medium">Marcas monitoradas</span>
+          <span className="block text-sm opacity-70">
+            Cadastro das marcas acompanhadas a cada edição da RPI
+          </span>
+        </Link>
       </nav>
       <section className="space-y-2 text-sm opacity-80">
         <p>Próximos módulos, na ordem do TASKS.md:</p>
         <ul className="list-inside list-disc space-y-1">
-          <li>Fase 2 — Relatório Consultor de Marca (HTML/PDF)</li>
-          <li>Fase 3 — Cadastro e monitoramento de marcas</li>
+          <li>Fase 3 — Eventos de alerta, importação em lote e job de verificação</li>
+          <li>Fase 4 — Motor de similaridade fonética</li>
         </ul>
       </section>
     </main>

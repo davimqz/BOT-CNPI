@@ -45,10 +45,10 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 - [x] Implementar o script `npm run search:pepi` chamado pelo workflow `.github/workflows/pepi-search.yml` (esqueleto já no repositório) — recebe `job_id`/`termo`/`tipo_busca` como inputs do `workflow_dispatch` e grava o resultado no Postgres associado ao `job_id` (tabela nova `pepi_search_jobs`, com coluna `etapa` atualizada em tempo real para o polling; teto de 30 páginas com flag `truncado`).
 - [x] Implementar, no lado do Next.js, a rota de API que: cria uma linha de "job" pendente no banco, chama a API do GitHub para disparar `pepi-search.yml` passando esse `job_id`, e retorna o `job_id` pro frontend (`POST /api/busca` + `GET /api/busca/[jobId]`; helper de dispatch em `src/lib/github.ts`).
 - [x] Implementar o polling no frontend: a tela de busca consulta o status do `job_id` a cada poucos segundos até o workflow terminar e o resultado aparecer (nunca deixe o usuário sem feedback nesse intervalo — mostrar algo como "consultando o INPI..." usando o mesmo espírito do log em tempo real do software de referência).
-- [ ] Implementar a tela de busca: campo nome/processo, Radical/Exata, filtro de classe NCL opcional — *parcial: `/busca` já tem nome + Radical/Exata + classe NCL; falta a busca por nº de processo (worker usaria `Pesquisa_num_processo.jsp`, já mapeado em `selectors.ts`).*
-- [ ] Implementar geração do relatório "Consultor de Marca" em HTML, seguindo a estrutura confirmada na skill `branded-report-builder` (veredito, 4 contadores, tabela, disclaimer).
-- [ ] Adicionar exportação para PDF do mesmo template (não duplicar o template).
-- [ ] Escrever o teste de "sanidade" da skill de scraping (consulta simples, tipo Exata, marca conhecida) que falha alto e claro se a estrutura da página mudou — rodar esse teste dentro do próprio workflow antes de assumir que ele está saudável.
+- [x] Implementar a tela de busca: campo nome/processo, Radical/Exata, filtro de classe NCL opcional — busca por nº de processo via `Pesquisa_num_processo.jsp`, validada ao vivo contra o pePI em 28/07/2026 (processo real retornou 1 resultado correto).
+- [x] Implementar geração do relatório "Consultor de Marca" em HTML, seguindo a estrutura confirmada na skill `branded-report-builder` (veredito, 4 contadores, tabela, disclaimer) — template único em `src/lib/relatorio/consultor-marca.ts`, servido por `GET /api/busca/[jobId]/relatorio`, com classificador de situação testado (ativa/inativa/verificar).
+- [x] Adicionar exportação para PDF do mesmo template (não duplicar o template) — via print-to-PDF do navegador (`?formato=pdf` abre o diálogo de impressão sobre o mesmo HTML, que já tem CSS de `@media print`/`@page`); gerar PDF server-side exigiria Playwright no Vercel, o que é proibido (CLAUDE.md Seção 5).
+- [x] Escrever o teste de "sanidade" da skill de scraping (consulta simples, tipo Exata, marca conhecida) que falha alto e claro se a estrutura da página mudou — rodar esse teste dentro do próprio workflow antes de assumir que ele está saudável. (`npm run sanity:pepi`, passo do `pepi-search.yml` antes da busca real; validado ao vivo em 28/07/2026 com 88 resultados para "NATURA". A sanidade pegou e levou à correção de um bug real: o link de acesso anônimo abre a sessão numa aba nova (`target="_blank"`) — a navegação precisa continuar nessa aba, senão todo JSP devolve a tela de login.)
 
 **Critério de pronto**: buscar uma marca real pela tela dispara o workflow, o polling mostra o resultado assim que ele termina, e o relatório sai correto em HTML e PDF.
 
@@ -56,7 +56,7 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 
 ## Fase 3 — Cadastro e monitoramento
 
-- [ ] CRUD de `marcas_monitoradas`: nome, processo, classe NCL, tipo de busca, cliente vinculado (se aplicável), fonte de dados (`rpi` ou `scraping`).
+- [x] CRUD de `marcas_monitoradas`: nome, processo, classe NCL, tipo de busca, cliente vinculado (se aplicável), fonte de dados (`rpi` ou `scraping`) — tela `/marcas` + `GET/POST /api/marcas` + `PATCH/DELETE /api/marcas/[id]`; exclusão bloqueada (409) quando há despachos vinculados, o caminho aí é desativar; usuário único criado on-demand via upsert por `AUTH_EMAIL` (`src/lib/usuario.ts`).
 - [ ] Tela de seleção de eventos que disparam alerta (lista de despachos da skill `rpi-ingestion-despachos`; "todos os eventos" como padrão se nada for marcado).
 - [ ] Importação em lote: aceitar colar texto ou upload de `.txt`/`.csv`, nos 3 formatos (só número; número+nome; número+nome+classe NCL).
 - [ ] Busca por depositante/titular: nome/razão social ou CPF/CNPJ, com coleta multi-página automática *(reaproveita o worker da Fase 2 — skill `pepi-scraping-playbook`)*.
