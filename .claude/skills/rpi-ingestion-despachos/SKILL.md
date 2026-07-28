@@ -58,9 +58,23 @@ Evite depender de scraping do índice HTML (`revistas.inpi.gov.br/rpi/`) como ú
 1. Determinar a edição alvo (ver acima).
 2. Baixar o ZIP; se 404, aguardar e tentar novamente (não falhar o job inteiro).
 3. Descompactar e fazer o parse do XML contra o schema validado no manual.
-4. Para cada despacho novo: gravar em `despachos` (ver modelo de dados no CLAUDE.md do projeto), e cruzar contra `marcas_monitoradas` para saber se algum processo cadastrado teve movimentação.
+4. Para cada despacho novo: gravar em `despachos` (ver modelo de dados no CLAUDE.md do projeto), e cruzar contra `marcas_monitoradas` para saber se algum processo cadastrado teve movimentação. **Este cruzamento É o job de verificação da fonte `rpi`** — não existe um job agendado separado para isso, e criar um seria trabalho duplicado. Implementado em `src/workers/rpi/ingest.ts` sobre a lógica pura de `src/lib/verificacao.ts`; ver "Cruzamento contra marcas monitoradas" abaixo.
 5. Quando houver correspondência, gerar o registro de prazo (`prazos`) usando a tabela de `references/despacho-codes.md`, e disparar o pipeline de notificação (fora do escopo desta skill — ver módulo de notificações no CLAUDE.md).
 6. Gravar a edição inteira em `edicoes_rpi` / histórico local, mesmo os despachos que não bateram com nenhuma marca monitorada — isso é o que alimenta a busca do "Histórico RPI" depois.
+
+## Cruzamento contra marcas monitoradas (confirmado ao vivo em 28/07/2026)
+
+Regras de casamento, na ordem em que importam:
+
+- **Marca cadastrada com nº de processo casa SÓ pelo número** — é o critério preciso, e o nome publicado na RPI frequentemente difere do que o usuário digitou. Compare só os dígitos, sem zeros à esquerda: os dois lados formatam o número de jeitos diferentes.
+- **Sem processo, casa por nome normalizado** (maiúsculas, sem acento, sem espaço/pontuação — "COCA-COLA" e "coca cola" precisam casar). Nome apenas *parecido* fica de fora: isso é o motor de similaridade da Fase 4, e misturar as duas coisas aqui esconde qual regra deixou passar o quê.
+- **A classe NCL da marca filtra, mas despacho sem classe não é descartado** — perder movimentação por campo vazio na revista é pior que um casamento a mais. Atenção: a RPI junta várias classes de um processo numa string só (`"35;41"`).
+- **O filtro de eventos escolhido pela marca decide o alerta, não o vínculo**: despacho que casa mas está fora dos eventos escolhidos é vinculado com `alerta_pendente = false`. O usuário continua vendo a movimentação no histórico; ele só não é notificado.
+
+Duas coisas que só aparecem quando o sistema já está rodando:
+
+- **Marca cadastrada depois da ingestão nunca seria cruzada** contra o que já está no banco. Por isso existe o modo retroativo `npm run ingest:rpi -- --recruzar[=N]` (últimas N edições, sem baixar nada).
+- **O cruzamento só olha despacho ainda sem marca vinculada.** É o que impede o modo retroativo de re-enfileirar um alerta que a Fase 6 já enviou — reprocessar não pode significar re-notificar.
 
 ## Erros comuns a evitar
 

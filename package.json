@@ -12,6 +12,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "ingest:rpi": "tsx src/workers/rpi/ingest.ts",
     "search:pepi": "tsx src/workers/pepi/search.ts",
+    "monitor:pepi": "tsx src/workers/pepi/monitor.ts",
     "sanity:pepi": "tsx src/workers/pepi/sanity.ts"
   },
   "dependencies": {

@@ -48,9 +48,34 @@ export const PEPI = {
     botaoPesquisar: 'input[type="submit"][name="botao"]',
   },
 
-  /** Busca por titular/depositante — página existe, formulário ainda NÃO inventariado (Fase 3). */
+  /**
+   * Busca por titular/depositante — confirmada ao vivo em 28/07/2026
+   * (explore-titular.ts). Fluxo em DUAS etapas:
+   *   1. o formulário (Action=searchNome) devolve uma lista de NOMES de titular
+   *      que contêm o termo — links "Action=searchMarca&tipoPesquisa=BY_CNPJ_NOME&pos=N";
+   *   2. clicar num nome devolve a lista de PROCESSOS daquele titular, na MESMA
+   *      estrutura de tabela/paginação da busca por marca (resultados.*).
+   * Gotchas confirmados:
+   *   - O casamento do nome é por substring, mas SENSÍVEL A ACENTO: "COSMETICOS"
+   *     não encontra "COSMÉTICOS". Buscar por um pedaço sem acento do nome.
+   *   - `pos=N` é estado de sessão (posição na lista da busca corrente), não um
+   *     identificador estável — só vale dentro da mesma sessão/busca.
+   *   - O campo de CPF/CNPJ aceita só dígitos (onkeyup remove o resto).
+   */
   buscaPorTitular: {
     url: '/pePI/jsp/marcas/Pesquisa_titular.jsp',
+    form: 'form[name="F_Pesquisa_Titular"]', // action: /pePI/servlet/MarcasServletController (Action=searchNome)
+    campoCpfCnpj: 'input[name="cpf_cgc_numINPI"]',
+    campoNome: 'input[name="nomeTitular"]',
+    /** select de resultados por página (lista de nomes): 20 (padrão), 40, 60, 80, 100. */
+    selectPorPagina: 'select[name="registerPerPage"]',
+    botaoPesquisar: 'input[type="submit"][name="botao"]',
+    /** Um link por titular encontrado na lista de nomes (etapa 1). */
+    linkTitular: 'a[href*="Action=searchMarca"][href*="tipoPesquisa=BY_CNPJ_NOME"]',
+    /** Paginação da lista de NOMES (a de processos usa resultados.linkPagina). */
+    linkPaginaNomes: (n: number) => `a[href*="Action=nextPageNome"][href*="page=${n}"]`,
+    /** Texto exibido quando nenhum titular casa com o termo. */
+    textoNenhumTitular: 'text=Nenhum Nome de Titular foi encontrado',
   },
 
   resultados: {

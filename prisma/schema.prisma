@@ -20,6 +20,7 @@ enum TipoBusca {
   radical
   exata
   processo // busca por nº de processo/protocolo (Pesquisa_num_processo.jsp)
+  titular // busca por depositante/titular — nome/razão social ou CPF/CNPJ (Pesquisa_titular.jsp)
 }
 
 enum StatusPrazo {
@@ -78,10 +79,18 @@ model MarcaMonitorada {
   // Percentual 0-100; só relevante quando similaridadeAtiva = true (Fase 4).
   similaridadeThreshold Int?       @map("similaridade_threshold")
   fonteDados            FonteDados @default(rpi) @map("fonte_dados")
-  // Códigos de despacho que disparam alerta; vazio = todos os eventos.
+  // Slugs de evento (src/lib/eventos-alerta.ts) que disparam alerta; vazio = todos.
+  // Slug em vez de código IPAS: o mapeamento evento→códigos pode ganhar códigos
+  // novos sem exigir migração das marcas já cadastradas.
   eventosAlerta         String[]   @default([]) @map("eventos_alerta")
   ativa                 Boolean    @default(true)
   criadoEm              DateTime   @default(now()) @map("criado_em")
+  // Só para fonteDados = scraping (workflow pepi-monitor.yml): último retrato
+  // "processo → situação" visto no pePI. A mudança em relação a este retrato é o
+  // que caracteriza "movimentação nova" nessa fonte — na fonte rpi quem faz esse
+  // papel é o despacho publicado na edição.
+  ultimoSnapshotPepi    Json?      @map("ultimo_snapshot_pepi")
+  verificadoEm          DateTime?  @map("verificado_em")
 
   usuario   Usuario    @relation(fields: [usuarioId], references: [id])
   cliente   Cliente?   @relation(fields: [clienteId], references: [id])
@@ -90,7 +99,9 @@ model MarcaMonitorada {
   @@map("marcas_monitoradas")
 }
 
-// Movimentação capturada de uma edição da RPI (ou do pePI, na fonte scraping).
+// Movimentação capturada de uma edição da RPI (ou do pePI, na fonte scraping —
+// nesse caso `edicaoRpiId` é nulo e o código é o sintético CODIGO_DESPACHO_PEPI
+// de src/lib/verificacao.ts, que não existe na tabela de códigos do INPI).
 model Despacho {
   id             String   @id @default(cuid())
   marcaId        String?  @map("marca_id")
@@ -103,6 +114,10 @@ model Despacho {
   textoDespacho     String?  @map("texto_despacho")
   textoComplementar String?  @map("texto_complementar")
   dataPublicacao    DateTime @map("data_publicacao")
+  // Marcado pelo job de verificação (Fase 3) quando o despacho bate com uma marca
+  // monitorada E o código está entre os eventos escolhidos por ela. O envio da
+  // Fase 6 consome esta fila e zera a flag — nunca reprocessar a edição inteira.
+  alertaPendente    Boolean  @default(false) @map("alerta_pendente")
   criadoEm       DateTime @default(now()) @map("criado_em")
 
   marca     MarcaMonitorada? @relation(fields: [marcaId], references: [id])
@@ -111,6 +126,7 @@ model Despacho {
 
   @@index([processo])
   @@index([codigo])
+  @@index([marcaId, alertaPendente])
   @@map("despachos")
 }
 

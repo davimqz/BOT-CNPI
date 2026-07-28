@@ -1,0 +1,52 @@
+# Monitoramento diário das marcas de fonte `scraping` (Fase 3 do TASKS.md).
+# As marcas de fonte `rpi` NÃO passam por aqui — elas são cruzadas dentro do
+# próprio rpi-ingestion.yml, contra a edição recém-processada.
+#
+# Por que uma vez ao dia, e não "a cada N minutos": o `schedule` do GitHub Actions
+# é best-effort (roda quando há runner livre, atrasos de dezenas de minutos são
+# normais) e cada marca abre um Chrome headless contra o pePI, que precisa de
+# espaçamento deliberado (skill pepi-scraping-playbook). Prometer intervalo fino
+# na variante gratuita seria promessa que a infraestrutura não sustenta.
+name: Monitor pePI
+
+on:
+  schedule:
+    # Gotcha: o GitHub desativa `schedule` em repositórios sem atividade há 60+ dias.
+    - cron: '0 11 * * *' # todo dia 08:00 BRT
+  workflow_dispatch:
+    inputs:
+      max_marcas:
+        description: 'Teto de marcas nesta rodada (padrão 25)'
+        required: false
+        type: string
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Instalar navegador do Playwright
+        run: npx playwright install --with-deps chromium
+
+      # Falha alto se o pePI mudou de layout — sem isso, uma mudança de página
+      # apareceria como "todos os processos sumiram" em vez de erro (skill
+      # pepi-scraping-playbook).
+      - name: Sanidade do pePI (estrutura da página)
+        run: npm run sanity:pepi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Verificar marcas monitoradas por scraping
+        run: npm run monitor:pepi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PEPI_MONITOR_MAX_MARCAS: ${{ inputs.max_marcas }}

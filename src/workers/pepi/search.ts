@@ -5,25 +5,42 @@
  * Entrada via env (inputs do workflow_dispatch):
  *   JOB_ID     — id da linha em pepi_search_jobs criada pela API (se não existir,
  *                cria uma a partir de TERMO/TIPO_BUSCA — útil para teste manual).
- *   TERMO      — nome da marca (radical/exata) ou nº de processo (processo).
- *   TIPO_BUSCA — "radical" | "exata" | "processo".
- *   CLASSE_NCL — opcional, filtro de classe.
+ *   TERMO      — nome da marca (radical/exata), nº de processo (processo) ou
+ *                nome/razão social/CPF/CNPJ do depositante (titular).
+ *   TIPO_BUSCA — "radical" | "exata" | "processo" | "titular".
+ *   CLASSE_NCL — opcional, filtro de classe (só radical/exata).
  *
  * O resultado (linhas da tabela do pePI, todas as páginas) é gravado como JSON
  * no job; cada etapa da automação atualiza job.etapa para o polling do frontend.
+ *
+ * Busca por titular é um fluxo de DUAS etapas no pePI (ver selectors.ts): quando
+ * o termo casa com vários titulares e nenhum é igual ao termo, o job devolve a
+ * LISTA DE NOMES (tipoResultado: "titulares") para o usuário escolher — a escolha
+ * dispara um novo job com o nome exato, que aí abre os processos direto.
  */
 import 'dotenv/config';
 import { chromium, type Page } from 'playwright';
 import { prisma } from '@/lib/db';
+import { interpretarTermoTitular, nomeTitularConfere } from '@/lib/busca-titular';
 import { PEPI } from './selectors';
 
 // Espaçamento entre páginas de resultado — rate limit deliberado (ver skill
 // pepi-scraping-playbook: nunca martelar o pePI em paralelo/sequência agressiva).
 const INTERVALO_ENTRE_PAGINAS_MS = 1500;
 const MAX_PAGINAS = 30;
-// O pePI pode levar bem mais que os 30s padrão para responder a uma consulta
-// (visto ao vivo em 28/07/2026: primeira busca da sessão levou ~20-40s).
-const TIMEOUT_CONSULTA_MS = 120_000;
+// Teto da LISTA DE NOMES da busca por titular (100 nomes/página). Um termo que
+// casa com mais de 300 titulares precisa ser refinado, não paginado até o fim.
+const MAX_PAGINAS_NOMES = 3;
+// A mesma razão social pode ter VÁRIOS cadastros na base do INPI (CNPJs/registros
+// distintos — visto ao vivo em 28/07/2026: 3× "NATURAFRIG ALIMENTOS LTDA"). A busca
+// abre cada cadastro e soma os processos, até este teto.
+const MAX_CADASTROS_TITULAR = 5;
+// O pePI pode levar MUITO mais que os 30s padrão para responder a uma consulta:
+// 20-40s numa janela tranquila e 150s numa congestionada (ambos vistos ao vivo em
+// 28/07/2026 — o mesmo processo, com as páginas estáticas respondendo em ~1s).
+// A margem é generosa de propósito: derrubar a consulta por timeout custa uma
+// rodada inteira de monitoramento, enquanto esperar custa só tempo de runner.
+const TIMEOUT_CONSULTA_MS = 240_000;
 
 export interface ResultadoPepi {
   processo: string;
@@ -69,12 +86,137 @@ async function extrairResultadosDaPagina(page: Page): Promise<ResultadoPepi[]> {
   });
 }
 
-export async function buscar(
-  termo: string,
-  tipo: 'radical' | 'exata' | 'processo',
-  classeNcl: string | null,
+export type TipoBuscaPepi = 'radical' | 'exata' | 'processo' | 'titular';
+
+export interface BuscaPepiResultado {
+  resultados: ResultadoPepi[];
+  paginas: number;
+  truncado: boolean;
+  /** Só na busca por titular: nome efetivamente aberto (casamento único ou exato). */
+  titularSelecionado?: string;
+  /** Só na busca por titular: nº de cadastros do mesmo nome somados no resultado (quando > 1). */
+  cadastrosDoTitular?: number;
+  /** Só na busca por titular sem casamento único: nomes para o usuário escolher. */
+  titulares?: string[];
+  titularesTruncado?: boolean;
+}
+
+/** Abre o formulário de busca por titular, preenche (nome OU CPF/CNPJ) e submete. */
+async function submeterBuscaTitular(page: Page, termo: string): Promise<void> {
+  const alvo = interpretarTermoTitular(termo);
+  if ('erro' in alvo) throw new Error(alvo.erro);
+  await page.goto(`${PEPI.baseUrl}${PEPI.buscaPorTitular.url}`, { waitUntil: 'domcontentloaded' });
+  if ((await page.locator(PEPI.buscaPorTitular.form).count()) === 0) {
+    throw new SiteMudouError('preenchendo busca', `formulário ${PEPI.buscaPorTitular.form} ausente`);
+  }
+  await page.fill(
+    alvo.campo === 'cpfCnpj' ? PEPI.buscaPorTitular.campoCpfCnpj : PEPI.buscaPorTitular.campoNome,
+    alvo.valor,
+  );
+  await page.selectOption(PEPI.buscaPorTitular.selectPorPagina, '100');
+  await page.click(PEPI.buscaPorTitular.botaoPesquisar, { timeout: TIMEOUT_CONSULTA_MS });
+  await page.waitForLoadState('domcontentloaded');
+}
+
+/** Extrai a página de processos corrente e todas as seguintes (até MAX_PAGINAS). */
+async function extrairTodasPaginas(
+  page: Page,
   aoMudarEtapa: (etapa: string) => Promise<void>,
 ): Promise<{ resultados: ResultadoPepi[]; paginas: number; truncado: boolean }> {
+  await aoMudarEtapa('extraindo resultados');
+  const resultados = await extrairResultadosDaPagina(page);
+  let pagina = 1;
+  while (pagina < MAX_PAGINAS) {
+    const proxima = page.locator(PEPI.resultados.linkPagina(pagina + 1));
+    if ((await proxima.count()) === 0) break;
+    pagina++;
+    await aoMudarEtapa(`extraindo resultados (página ${pagina})`);
+    await page.waitForTimeout(INTERVALO_ENTRE_PAGINAS_MS);
+    // Paginação é estado de sessão no servidor — precisa navegar na mesma sessão.
+    await proxima.first().click({ timeout: TIMEOUT_CONSULTA_MS });
+    await page.waitForLoadState('domcontentloaded');
+    resultados.push(...(await extrairResultadosDaPagina(page)));
+  }
+  // Ainda há próxima página após o teto de MAX_PAGINAS → resultado incompleto.
+  const truncado = (await page.locator(PEPI.resultados.linkPagina(pagina + 1)).count()) > 0;
+  return { resultados, paginas: pagina, truncado };
+}
+
+/**
+ * Etapa 1 da busca por titular: na página de nomes retornada pelo Action=searchNome,
+ * abre direto os processos quando há um único titular ou um cujo nome é IGUAL ao
+ * termo; caso contrário coleta a lista de nomes (até MAX_PAGINAS_NOMES páginas)
+ * para o usuário escolher. A mesma razão social pode aparecer várias vezes na base
+ * (cadastros/CNPJs distintos) — `totalExatos`/`paginaNomes` permitem a buscar()
+ * voltar e abrir os demais cadastros. `pos=N` dos links é estado de sessão, então
+ * só clicamos em links da página em que estamos — nunca guardamos href para depois.
+ */
+async function escolherTitular(
+  page: Page,
+  termo: string,
+  aoMudarEtapa: (etapa: string) => Promise<void>,
+): Promise<
+  | { abriu: true; titularSelecionado: string; paginaNomes: number; totalExatos: number }
+  | { abriu: false; titulares: string[]; titularesTruncado: boolean }
+> {
+  if ((await page.locator(PEPI.buscaPorTitular.textoNenhumTitular).count()) > 0) {
+    return { abriu: false, titulares: [], titularesTruncado: false };
+  }
+
+  const nomes: string[] = [];
+  let paginaNomes = 1;
+  for (;;) {
+    const links = page.locator(PEPI.buscaPorTitular.linkTitular);
+    const textos = (await links.allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim());
+    if (textos.length === 0 && nomes.length === 0) {
+      throw new SiteMudouError(
+        'listando titulares',
+        'nem lista de titulares nem aviso de "nenhum titular" na resposta',
+      );
+    }
+
+    const exatos = textos.filter((t) => nomeTitularConfere(t, termo));
+    if (exatos.length > 0) {
+      const primeiro = textos.findIndex((t) => nomeTitularConfere(t, termo));
+      await aoMudarEtapa(`abrindo processos do titular "${textos[primeiro]}"`);
+      await links.nth(primeiro).click({ timeout: TIMEOUT_CONSULTA_MS });
+      await page.waitForLoadState('domcontentloaded');
+      return {
+        abriu: true,
+        titularSelecionado: textos[primeiro],
+        paginaNomes,
+        totalExatos: exatos.length,
+      };
+    }
+    nomes.push(...textos);
+
+    const proxima = page.locator(PEPI.buscaPorTitular.linkPaginaNomes(paginaNomes + 1));
+    if (paginaNomes >= MAX_PAGINAS_NOMES || (await proxima.count()) === 0) {
+      if (nomes.length === 1 && paginaNomes === 1) {
+        // Único titular encontrado — abrir direto, sem forçar o usuário a "escolher" entre 1.
+        await aoMudarEtapa(`abrindo processos do titular "${nomes[0]}"`);
+        await links.first().click({ timeout: TIMEOUT_CONSULTA_MS });
+        await page.waitForLoadState('domcontentloaded');
+        return { abriu: true, titularSelecionado: nomes[0], paginaNomes: 1, totalExatos: 1 };
+      }
+      const titularesTruncado = (await proxima.count()) > 0;
+      return { abriu: false, titulares: nomes, titularesTruncado };
+    }
+
+    paginaNomes++;
+    await aoMudarEtapa(`listando titulares (página ${paginaNomes})`);
+    await page.waitForTimeout(INTERVALO_ENTRE_PAGINAS_MS);
+    await proxima.first().click({ timeout: TIMEOUT_CONSULTA_MS });
+    await page.waitForLoadState('domcontentloaded');
+  }
+}
+
+export async function buscar(
+  termo: string,
+  tipo: TipoBuscaPepi,
+  classeNcl: string | null,
+  aoMudarEtapa: (etapa: string) => Promise<void>,
+): Promise<BuscaPepiResultado> {
   const browser = await chromium.launch({ headless: true });
   try {
     const ctx = await browser.newContext({
@@ -104,7 +246,9 @@ export async function buscar(
     await page.waitForLoadState('domcontentloaded');
 
     await aoMudarEtapa('preenchendo busca');
-    if (tipo === 'processo') {
+    if (tipo === 'titular') {
+      await submeterBuscaTitular(page, termo);
+    } else if (tipo === 'processo') {
       await page.goto(`${PEPI.baseUrl}${PEPI.buscaPorProcesso.url}`, { waitUntil: 'domcontentloaded' });
       if ((await page.locator(PEPI.buscaPorProcesso.form).count()) === 0) {
         throw new SiteMudouError('preenchendo busca', `formulário ${PEPI.buscaPorProcesso.form} ausente`);
@@ -124,7 +268,6 @@ export async function buscar(
     }
     await page.waitForLoadState('domcontentloaded');
 
-    await aoMudarEtapa('extraindo resultados');
     // Sanidade: a página de resposta deve ser reconhecível mesmo sem resultados.
     const paginaValida = await page
       .locator('text=Consulta à Base de Dados do INPI')
@@ -134,23 +277,69 @@ export async function buscar(
       throw new SiteMudouError('extraindo resultados', 'página de resposta não reconhecida');
     }
 
-    const resultados = await extrairResultadosDaPagina(page);
-    let pagina = 1;
-    while (pagina < MAX_PAGINAS) {
-      const proxima = page.locator(PEPI.resultados.linkPagina(pagina + 1));
-      if ((await proxima.count()) === 0) break;
-      pagina++;
-      await aoMudarEtapa(`extraindo resultados (página ${pagina})`);
-      await page.waitForTimeout(INTERVALO_ENTRE_PAGINAS_MS);
-      // Paginação é estado de sessão no servidor — precisa navegar na mesma sessão.
-      await proxima.first().click({ timeout: TIMEOUT_CONSULTA_MS });
-      await page.waitForLoadState('domcontentloaded');
-      resultados.push(...(await extrairResultadosDaPagina(page)));
+    if (tipo === 'titular') {
+      await aoMudarEtapa('listando titulares');
+      const escolha = await escolherTitular(page, termo, aoMudarEtapa);
+      if (!escolha.abriu) {
+        return {
+          resultados: [],
+          paginas: 0,
+          truncado: false,
+          titulares: escolha.titulares,
+          titularesTruncado: escolha.titularesTruncado,
+        };
+      }
+
+      const primeiro = await extrairTodasPaginas(page, aoMudarEtapa);
+      const porProcesso = new Map(primeiro.resultados.map((r) => [r.processo, r]));
+      let paginas = primeiro.paginas;
+      let truncado = primeiro.truncado;
+
+      // Demais cadastros do mesmo nome: `pos=N` só vale na sessão da busca de
+      // nomes corrente, então refazemos a busca inteira para cada cadastro.
+      const cadastros = Math.min(escolha.totalExatos, MAX_CADASTROS_TITULAR);
+      for (let i = 1; i < cadastros; i++) {
+        await aoMudarEtapa(
+          `titular tem ${escolha.totalExatos} cadastros na base — abrindo cadastro ${i + 1}`,
+        );
+        await page.waitForTimeout(INTERVALO_ENTRE_PAGINAS_MS);
+        await submeterBuscaTitular(page, termo);
+        for (let p = 2; p <= escolha.paginaNomes; p++) {
+          await page.waitForTimeout(INTERVALO_ENTRE_PAGINAS_MS);
+          await page
+            .locator(PEPI.buscaPorTitular.linkPaginaNomes(p))
+            .first()
+            .click({ timeout: TIMEOUT_CONSULTA_MS });
+          await page.waitForLoadState('domcontentloaded');
+        }
+        const links = page.locator(PEPI.buscaPorTitular.linkTitular);
+        const textos = (await links.allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim());
+        const exatos = textos
+          .map((t, idx) => (nomeTitularConfere(t, termo) ? idx : -1))
+          .filter((idx) => idx >= 0);
+        if (i >= exatos.length) break; // a lista mudou entre as buscas — não insistir
+        await links.nth(exatos[i]).click({ timeout: TIMEOUT_CONSULTA_MS });
+        await page.waitForLoadState('domcontentloaded');
+        const parcial = await extrairTodasPaginas(page, aoMudarEtapa);
+        for (const r of parcial.resultados) {
+          if (!porProcesso.has(r.processo)) porProcesso.set(r.processo, r);
+        }
+        paginas += parcial.paginas;
+        truncado = truncado || parcial.truncado;
+      }
+
+      return {
+        resultados: [...porProcesso.values()],
+        paginas,
+        // Cadastros além do teto ficam de fora → resultado explicitamente incompleto.
+        truncado: truncado || escolha.totalExatos > MAX_CADASTROS_TITULAR,
+        titularSelecionado: escolha.titularSelecionado,
+        ...(escolha.totalExatos > 1 ? { cadastrosDoTitular: escolha.totalExatos } : {}),
+      };
     }
 
-    // Ainda há próxima página após o teto de MAX_PAGINAS → resultado incompleto.
-    const truncado = (await page.locator(PEPI.resultados.linkPagina(pagina + 1)).count()) > 0;
-    return { resultados, paginas: pagina, truncado };
+    const { resultados, paginas, truncado } = await extrairTodasPaginas(page, aoMudarEtapa);
+    return { resultados, paginas, truncado };
   } finally {
     await browser.close();
   }
@@ -171,7 +360,7 @@ async function main() {
     // Dispatch manual de teste pela aba Actions: cria o job a partir dos inputs.
     const termo = process.env.TERMO;
     const tipo = process.env.TIPO_BUSCA;
-    if (!termo || (tipo !== 'radical' && tipo !== 'exata' && tipo !== 'processo')) {
+    if (!termo || (tipo !== 'radical' && tipo !== 'exata' && tipo !== 'processo' && tipo !== 'titular')) {
       throw new Error(`Job ${jobId} não existe e TERMO/TIPO_BUSCA não permitem criá-lo.`);
     }
     job = await prisma.pepiSearchJob.create({
@@ -189,23 +378,32 @@ async function main() {
   };
 
   try {
-    const { resultados, paginas, truncado } = await buscar(
-      job.termo,
-      job.tipoBusca,
-      job.classeNcl,
-      aoMudarEtapa,
-    );
+    const busca = await buscar(job.termo, job.tipoBusca, job.classeNcl, aoMudarEtapa);
+    // Busca por titular sem casamento único devolve a lista de nomes para o
+    // usuário escolher (a escolha dispara um novo job com o nome exato).
+    const resultado = busca.titulares
+      ? {
+          tipoResultado: 'titulares' as const,
+          total: busca.titulares.length,
+          titulares: busca.titulares,
+          truncado: busca.titularesTruncado ?? false,
+        }
+      : {
+          total: busca.resultados.length,
+          paginas: busca.paginas,
+          truncado: busca.truncado,
+          itens: busca.resultados,
+          ...(busca.titularSelecionado ? { titular: busca.titularSelecionado } : {}),
+          ...(busca.cadastrosDoTitular ? { cadastrosTitular: busca.cadastrosDoTitular } : {}),
+        };
     await prisma.pepiSearchJob.update({
       where: { id: job.id },
-      data: {
-        status: 'sucesso',
-        etapa: 'concluído',
-        resultado: { total: resultados.length, paginas, truncado, itens: resultados } as object,
-        finalizadoEm: new Date(),
-      },
+      data: { status: 'sucesso', etapa: 'concluído', resultado: resultado as object, finalizadoEm: new Date() },
     });
     console.log(
-      `[pepi] concluído: ${resultados.length} resultados em ${paginas} página(s)${truncado ? ' (TRUNCADO no teto de páginas)' : ''}.`,
+      busca.titulares
+        ? `[pepi] concluído: ${busca.titulares.length} titular(es) encontrados — aguardando escolha do usuário${busca.titularesTruncado ? ' (LISTA TRUNCADA, refinar o termo)' : ''}.`
+        : `[pepi] concluído: ${busca.resultados.length} resultados em ${busca.paginas} página(s)${busca.truncado ? ' (TRUNCADO no teto de páginas)' : ''}.`,
     );
   } catch (e) {
     const erro = e as Error;

@@ -1,6 +1,8 @@
 // Validação do payload de marca monitorada, compartilhada entre POST (criação,
 // payload completo) e PATCH (edição, payload parcial — só os campos presentes).
 
+import { eventoPorSlug } from './eventos-alerta';
+
 export interface DadosMarca {
   nome?: string;
   processo?: string | null;
@@ -8,6 +10,7 @@ export interface DadosMarca {
   tipoBusca?: 'radical' | 'exata';
   fonteDados?: 'rpi' | 'scraping';
   clienteId?: string | null;
+  eventosAlerta?: string[];
   ativa?: boolean;
 }
 
@@ -57,6 +60,18 @@ export function validarMarca(
   if (presente('clienteId')) {
     const clienteId = typeof body.clienteId === 'string' ? body.clienteId.trim() : '';
     dados.clienteId = clienteId || null;
+  }
+
+  if (presente('eventosAlerta')) {
+    const lista = body.eventosAlerta;
+    if (!Array.isArray(lista) || lista.some((e) => typeof e !== 'string')) {
+      return { erro: 'eventosAlerta deve ser uma lista de eventos' };
+    }
+    const slugs = [...new Set(lista as string[])];
+    const invalido = slugs.find((s) => !eventoPorSlug(s));
+    if (invalido) return { erro: `Evento de alerta desconhecido: "${invalido}"` };
+    // Lista vazia é válida e significa "todos os eventos" (padrão).
+    dados.eventosAlerta = slugs;
   }
 
   if (presente('ativa')) {

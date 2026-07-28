@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       termo:
-        description: 'Termo buscado (nome da marca ou número de processo)'
+        description: 'Termo buscado (nome da marca, número de processo ou titular/CPF/CNPJ)'
         required: true
         type: string
       tipo_busca:
@@ -23,6 +23,7 @@ on:
           - radical
           - exata
           - processo
+          - titular
 
 jobs:
   search:

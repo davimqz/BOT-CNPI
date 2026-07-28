@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { EVENTOS_ALERTA, eventoPorSlug } from '@/lib/eventos-alerta';
 
 // CRUD de marcas monitoradas (Fase 3). A fonte de dados padrão é a RPI semanal —
 // scraping do pePI é último recurso, só para quem precisa de detecção mais
@@ -21,6 +22,7 @@ interface Marca {
   fonteDados: 'rpi' | 'scraping';
   clienteId: string | null;
   cliente: Cliente | null;
+  eventosAlerta: string[];
   ativa: boolean;
 }
 
@@ -31,6 +33,13 @@ interface FormMarca {
   tipoBusca: 'radical' | 'exata';
   fonteDados: 'rpi' | 'scraping';
   clienteId: string;
+  eventosAlerta: string[];
+}
+
+interface ResultadoImportacao {
+  importadas: number;
+  jaMonitoradas: number;
+  erros: { linha: number; conteudo: string; motivo: string }[];
 }
 
 const FORM_VAZIO: FormMarca = {
@@ -40,7 +49,15 @@ const FORM_VAZIO: FormMarca = {
   tipoBusca: 'radical',
   fonteDados: 'rpi',
   clienteId: '',
+  eventosAlerta: [],
 };
+
+function resumoEventos(eventosAlerta: string[]): string {
+  if (eventosAlerta.length === 0) return 'todos';
+  return eventosAlerta
+    .map((slug) => eventoPorSlug(slug)?.rotulo ?? slug)
+    .join(', ');
+}
 
 export default function MarcasPage() {
   const [marcas, setMarcas] = useState<Marca[]>([]);
@@ -50,6 +67,9 @@ export default function MarcasPage() {
   const [form, setForm] = useState<FormMarca>(FORM_VAZIO);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const [importTexto, setImportTexto] = useState('');
+  const [importando, setImportando] = useState(false);
+  const [importResultado, setImportResultado] = useState<ResultadoImportacao | null>(null);
 
   const carregar = useCallback(() => {
     return fetch('/api/marcas')
@@ -80,6 +100,7 @@ export default function MarcasPage() {
       tipoBusca: m.tipoBusca === 'exata' ? 'exata' : 'radical',
       fonteDados: m.fonteDados,
       clienteId: m.clienteId ?? '',
+      eventosAlerta: m.eventosAlerta,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -107,6 +128,43 @@ export default function MarcasPage() {
       setErro((e as Error).message);
     } finally {
       setSalvando(false);
+    }
+  }
+
+  async function carregarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const arquivo = e.target.files?.[0];
+    if (!arquivo) return;
+    setImportTexto(await arquivo.text());
+    setImportResultado(null);
+    e.target.value = ''; // permite re-selecionar o mesmo arquivo depois de corrigi-lo
+  }
+
+  async function importar() {
+    setErro(null);
+    setImportResultado(null);
+    setImportando(true);
+    try {
+      const resp = await fetch('/api/marcas/importar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto: importTexto }),
+      });
+      const data = (await resp.json()) as Partial<ResultadoImportacao> & { erro?: string };
+      if (!resp.ok && !data.erros?.length) throw new Error(data.erro ?? `HTTP ${resp.status}`);
+      setImportResultado({
+        importadas: data.importadas ?? 0,
+        jaMonitoradas: data.jaMonitoradas ?? 0,
+        erros: data.erros ?? [],
+      });
+      if ((data.importadas ?? 0) > 0) {
+        // Deixa no textarea só as linhas com problema, prontas para corrigir.
+        setImportTexto(data.erros?.map((e) => e.conteudo).join('\n') ?? '');
+        await carregar();
+      }
+    } catch (e) {
+      setErro((e as Error).message);
+    } finally {
+      setImportando(false);
     }
   }
 
@@ -270,6 +328,59 @@ export default function MarcasPage() {
             )}
           </span>
         </div>
+        <fieldset className="mt-4" disabled={salvando}>
+          <span className="mb-1 block opacity-70">Eventos que disparam alerta</span>
+          <div className="rounded border border-black/20 p-3 dark:border-white/20">
+            <label className="flex cursor-pointer items-center gap-1.5 font-medium">
+              <input
+                type="checkbox"
+                checked={form.eventosAlerta.length === 0}
+                onChange={() => setForm({ ...form, eventosAlerta: [] })}
+              />
+              Todos os eventos (padrão)
+            </label>
+            <p className="mb-2 mt-1 text-xs opacity-60">
+              Marque eventos específicos abaixo para alertar só sobre eles; desmarcar tudo volta ao
+              padrão de alertar sobre qualquer movimentação.
+            </p>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {EVENTOS_ALERTA.map((ev) => {
+                const semDespacho = ev.codigos.length === 0;
+                return (
+                  <label
+                    key={ev.slug}
+                    className={
+                      semDespacho
+                        ? 'flex items-center gap-1.5 opacity-40'
+                        : 'flex cursor-pointer items-center gap-1.5'
+                    }
+                    title={
+                      semDespacho
+                        ? 'Situação do processo, não um despacho publicado na RPI — não gera alerta na ingestão semanal.'
+                        : ev.codigos.join(', ')
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={semDespacho}
+                      checked={form.eventosAlerta.includes(ev.slug)}
+                      onChange={() =>
+                        setForm((f) => ({
+                          ...f,
+                          eventosAlerta: f.eventosAlerta.includes(ev.slug)
+                            ? f.eventosAlerta.filter((s) => s !== ev.slug)
+                            : [...f.eventosAlerta, ev.slug],
+                        }))
+                      }
+                    />
+                    {ev.rotulo}
+                    {semDespacho && <span className="text-xs">(estado, sem alerta)</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </fieldset>
         {form.fonteDados === 'scraping' && (
           <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
             Scraping do pePI é a opção de último recurso (mais frágil e sujeita a bloqueio) — use
@@ -277,6 +388,64 @@ export default function MarcasPage() {
           </p>
         )}
       </form>
+
+      <details className="mb-8 rounded border border-black/10 p-4 text-sm dark:border-white/15">
+        <summary className="cursor-pointer font-medium">Importação em lote</summary>
+        <p className="mb-2 mt-3 text-xs opacity-60">
+          Cole abaixo (ou envie um arquivo .txt/.csv) uma marca por linha, em qualquer um dos 3
+          formatos: só o nº do processo; nº + nome; nº + nome + classe NCL. Separadores aceitos:
+          ponto e vírgula, vírgula ou tab. Linhas sem nome entram como busca por processo.
+        </p>
+        <textarea
+          value={importTexto}
+          onChange={(e) => setImportTexto(e.target.value)}
+          placeholder={'912345678\n923456789;NATURA\n934567890;AÇAÍ DO NORTE;30'}
+          rows={6}
+          disabled={importando}
+          className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 font-mono text-xs dark:border-white/20"
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={importar}
+            disabled={importando || !importTexto.trim()}
+            className="rounded bg-foreground px-4 py-1.5 font-medium text-background disabled:opacity-50"
+          >
+            {importando ? 'Importando…' : 'Importar'}
+          </button>
+          <label className="cursor-pointer underline opacity-80 hover:opacity-100">
+            carregar arquivo .txt/.csv
+            <input
+              type="file"
+              accept=".txt,.csv,text/plain,text/csv"
+              onChange={carregarArquivo}
+              disabled={importando}
+              className="hidden"
+            />
+          </label>
+        </div>
+        {importResultado && (
+          <div className="mt-3">
+            <p>
+              {importResultado.importadas} marca(s) importada(s)
+              {importResultado.jaMonitoradas > 0 &&
+                `, ${importResultado.jaMonitoradas} já estava(m) no monitor`}
+              {importResultado.erros.length > 0 &&
+                `, ${importResultado.erros.length} linha(s) com erro`}
+              .
+            </p>
+            {importResultado.erros.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-red-700 dark:text-red-400">
+                {importResultado.erros.map((e) => (
+                  <li key={`${e.linha}-${e.conteudo}`}>
+                    linha {e.linha} (<span className="font-mono">{e.conteudo}</span>): {e.motivo}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </details>
 
       {erro && (
         <p className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400">
@@ -300,6 +469,7 @@ export default function MarcasPage() {
               <th className="px-3 py-2 font-medium">Tipo</th>
               <th className="px-3 py-2 font-medium">Fonte</th>
               <th className="px-3 py-2 font-medium">Cliente</th>
+              <th className="px-3 py-2 font-medium">Alertas</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Ações</th>
             </tr>
@@ -313,6 +483,13 @@ export default function MarcasPage() {
                 <td className="px-3 py-2 capitalize">{m.tipoBusca}</td>
                 <td className="px-3 py-2">{m.fonteDados === 'rpi' ? 'RPI semanal' : 'pePI'}</td>
                 <td className="px-3 py-2">{m.cliente?.nome ?? '—'}</td>
+                <td className="max-w-56 px-3 py-2" title={resumoEventos(m.eventosAlerta)}>
+                  {m.eventosAlerta.length === 0 ? (
+                    'todos os eventos'
+                  ) : (
+                    <span className="line-clamp-2">{resumoEventos(m.eventosAlerta)}</span>
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   <span
                     className={
@@ -345,7 +522,7 @@ export default function MarcasPage() {
             ))}
             {!carregando && marcas.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center opacity-60">
+                <td colSpan={9} className="px-3 py-8 text-center opacity-60">
                   Nenhuma marca cadastrada ainda — adicione a primeira no formulário acima.
                 </td>
               </tr>

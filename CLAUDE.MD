@@ -42,7 +42,8 @@ Todo o stack acima cabe em tiers gratuitos para uso pessoal (um usuário, uma ma
 - **Ingestão semanal da RPI**: workflow agendado (`.github/workflows/rpi-ingestion.yml`), dispara toda terça, roda em runner Ubuntu (sem limite de 60s — o limite de job do GitHub Actions é de horas, não segundos), grava direto no Neon.
 - **Consulta ao vivo / busca manual**: quando o usuário busca algo pela interface, o Next.js dispara um workflow via `workflow_dispatch` (chamada à API REST do GitHub, usando um token com permissão de `actions: write` no repositório), passando o termo buscado; o workflow roda a busca no pePI e grava o resultado no Postgres; o frontend faz polling curto até o resultado aparecer. Isso adiciona uma latência de alguns segundos a dezenas de segundos (tempo de fila do runner) comparado a uma função serverless tradicional — aceitável para uso pessoal, não para um produto que promete resposta instantânea.
 - Limites de referência (confirmados em julho de 2026, reconferir periodicamente pois tiers gratuitos mudam): Vercel Hobby (1M invocações/mês, função de até 60s), Neon free (0,5GB armazenamento, 100h de computação/mês, auto-suspende após 5 min ocioso), GitHub Actions (2.000 min grátis/mês em repositório privado, ilimitado em repositório público), Meta Cloud API (1.000 conversas de serviço grátis/mês).
-- Os workflows-base (`.github/workflows/rpi-ingestion.yml` e `.github/workflows/pepi-search.yml`) já estão neste repositório como esqueleto — ver Fases 0-2 do `TASKS.md` para o que falta implementar dentro deles.
+- **Monitoramento diário das marcas de fonte `scraping`**: workflow agendado (`.github/workflows/pepi-monitor.yml`), roda `npm run monitor:pepi` uma vez ao dia. As marcas de fonte `rpi` não passam por aqui — elas são cruzadas dentro do próprio `rpi-ingestion.yml`. Frequência fina ("a cada 15 minutos") não é possível nesta variante: `schedule` do GitHub é best-effort e cada marca abre um navegador contra o pePI.
+- Os três workflows (`rpi-ingestion.yml`, `pepi-search.yml`, `pepi-monitor.yml`) vivem em `.github/workflows/` — ver `TASKS.md` para o estado de cada fase.
 
 ## 4. Modelo de dados
 
@@ -50,8 +51,8 @@ Todo o stack acima cabe em tiers gratuitos para uso pessoal (um usuário, uma ma
 |---|---|
 | `usuarios` | Conta/dono da configuração (escritório ou usuário único). |
 | `clientes` | Pessoas/empresas para quem uma marca é monitorada; e-mail e WhatsApp próprios. Pode ser descartada se o uso for só pessoal. |
-| `marcas_monitoradas` | Nome, processo, classe NCL, tipo de busca, similaridade on/off + threshold, fonte de dados (`rpi` ou `scraping`), cliente vinculado, eventos que disparam alerta. |
-| `despachos` | Movimentação capturada: marca relacionada, edição da RPI, data de publicação, código e texto do despacho. |
+| `marcas_monitoradas` | Nome, processo, classe NCL, tipo de busca, similaridade on/off + threshold, fonte de dados (`rpi` ou `scraping`), cliente vinculado, eventos que disparam alerta. Só na fonte `scraping`: `ultimo_snapshot_pepi` (retrato "processo → situação" da última consulta) e `verificado_em` — é a diferença entre retratos que caracteriza movimentação nova nessa fonte. |
+| `despachos` | Movimentação capturada: marca relacionada, edição da RPI, data de publicação, código e texto do despacho. `alerta_pendente` é a fila de notificação preenchida pelo job de verificação (Fase 3) e consumida pelo envio (Fase 6). Despacho vindo do pePI tem `edicao_rpi_id` nulo e o código sintético `PEPI-SITUACAO` (que não existe na tabela do INPI, e por isso nunca alimenta o cálculo de prazos da Fase 5). |
 | `prazos` | Derivado de um despacho: tipo de prazo, data-limite, status (pendente/cumprido/vencido). |
 | `edicoes_rpi` | Cache local de cada edição já processada — número, data de publicação, timestamp de processamento. |
 | `templates` | Configuração de marca própria por usuário: cores, logo, textos de relatório e e-mail, assinatura. |

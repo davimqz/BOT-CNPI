@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { interpretarTermoTitular } from '@/lib/busca-titular';
 import { prisma } from '@/lib/db';
 import { dispararWorkflow } from '@/lib/github';
 
@@ -15,9 +16,14 @@ export async function POST(request: Request) {
   if (!termo || termo.length < 2) {
     return NextResponse.json({ erro: 'Informe um termo com pelo menos 2 caracteres' }, { status: 400 });
   }
-  if (body.tipoBusca !== 'radical' && body.tipoBusca !== 'exata' && body.tipoBusca !== 'processo') {
+  if (
+    body.tipoBusca !== 'radical' &&
+    body.tipoBusca !== 'exata' &&
+    body.tipoBusca !== 'processo' &&
+    body.tipoBusca !== 'titular'
+  ) {
     return NextResponse.json(
-      { erro: 'tipoBusca deve ser "radical", "exata" ou "processo"' },
+      { erro: 'tipoBusca deve ser "radical", "exata", "processo" ou "titular"' },
       { status: 400 },
     );
   }
@@ -27,8 +33,16 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  // Classe NCL só se aplica à busca por nome — o formulário de nº de processo não tem esse filtro.
-  const classeNcl = body.tipoBusca === 'processo' ? null : body.classeNcl?.trim() || null;
+  if (body.tipoBusca === 'titular') {
+    const alvo = interpretarTermoTitular(termo);
+    if ('erro' in alvo) return NextResponse.json({ erro: alvo.erro }, { status: 400 });
+  }
+  // Classe NCL só se aplica à busca por nome de marca — os formulários de nº de
+  // processo e de titular não têm esse filtro.
+  const classeNcl =
+    body.tipoBusca === 'processo' || body.tipoBusca === 'titular'
+      ? null
+      : body.classeNcl?.trim() || null;
   if (classeNcl && !/^\d{1,2}$/.test(classeNcl)) {
     return NextResponse.json({ erro: 'Classe NCL deve ser um número de 1 a 45' }, { status: 400 });
   }

@@ -37,7 +37,35 @@ Não invente seletores de memória — a estrutura real da página só pode ser 
 ### Gotchas confirmados ao vivo (28/07/2026)
 
 - **O login anônimo abre uma ABA NOVA**: o link "Continuar...." tem `target="_blank"`. O `LoginController?action=login` roda na aba nova (mesmos cookies de contexto) — a automação precisa capturar essa aba (`context.waitForEvent('page')`) e continuar a navegação NELA. Se continuar na aba original, a sessão não está autenticada e qualquer JSP devolve a tela de login (`F_LoginCliente`) em vez do formulário de busca.
-- **Consultas podem passar de 30s**: a primeira busca de uma sessão levou 20-40s para responder. Use timeout de ~120s na submissão do formulário e nos cliques de paginação, não o padrão de 30s do Playwright.
+- **Consultas podem passar de 30s — e MUITO**: a primeira busca de uma sessão levou 20-40s pela manhã e **150s** à tarde do mesmo dia, para o mesmo processo, com as páginas estáticas respondendo em ~1s o tempo todo. Ou seja: página abrir rápido não diz nada sobre a consulta responder rápido, e um timeout de 120s dá falso "o site caiu". `TIMEOUT_CONSULTA_MS` está em 240s na submissão do formulário e nos cliques de paginação — esperar custa tempo de runner, desistir cedo custa a rodada inteira de monitoramento.
+
+### Busca por titular/depositante — fluxo confirmado ao vivo (28/07/2026)
+
+A busca por titular (`Pesquisa_titular.jsp`, form `F_Pesquisa_Titular`) é um fluxo de **duas etapas**, diferente da busca por marca:
+
+1. O submit (`Action=searchNome`, `tipoPesquisa=BY_CNPJ_NOME`) devolve uma lista de **NOMES de titular** que contêm o termo — um link por nome (`Action=searchMarca&pos=N`), paginada por `Action=nextPageNome&page=N` (até 100/página).
+2. Clicar num nome devolve a lista de **PROCESSOS** daquele titular, na mesma estrutura de tabela e paginação (`Action=nextPageMarca`) da busca por marca — a extração é reaproveitada.
+
+Gotchas específicos:
+
+- **O casamento do nome é por substring mas SENSÍVEL A ACENTO**: "NATURA COSMETICOS" NÃO encontra "NATURA COSMÉTICOS S/A". Oriente o usuário a buscar um pedaço sem palavras acentuadas, ou pelo CPF/CNPJ.
+- **`pos=N` é estado de sessão**, não identificador estável: só vale dentro da busca de nomes corrente. Nunca guarde o href para usar depois — para abrir outro nome da mesma busca, refaça a busca e clique de novo.
+- **A mesma razão social pode ter VÁRIOS cadastros na base** (visto: 3× "NATURAFRIG ALIMENTOS LTDA", alguns exibidos entre apóstrofos). Cada cadastro pode ter processos próprios — colete a UNIÃO dos processos de todos os cadastros com o nome exato (deduplicando por nº de processo), senão o resultado fica silenciosamente incompleto.
+- **O campo de CPF/CNPJ (`cpf_cgc_numINPI`) aceita só dígitos** (um `onkeyup` remove o resto) — envie 11 ou 14 dígitos, sem pontuação.
+- Quando nada casa, a resposta é a frase "Nenhum Nome de Titular foi encontrado" (sem tabela) — trate como zero resultados, não como mudança de layout.
+
+Implementação de referência: `src/workers/pepi/search.ts` (tipo `titular`) + `src/workers/pepi/selectors.ts` (`PEPI.buscaPorTitular`); exploração em `src/workers/pepi/explore-titular.ts`.
+
+### Monitoramento recorrente por scraping (não é o mesmo problema que a busca sob demanda)
+
+A busca sob demanda responde "como está agora"; o monitoramento precisa responder "o que MUDOU desde a última vez" — e o pePI não publica eventos, só estado. Por isso o monitor (`src/workers/pepi/monitor.ts`, workflow `pepi-monitor.yml`) guarda um retrato `processo → situação` por marca (`marcas_monitoradas.ultimo_snapshot_pepi`) e trata a diferença entre retratos como movimentação. Armadilhas que esse desenho precisa cobrir — todas viram alerta falso se ignoradas:
+
+- **Primeira verificação nunca alerta**: sem retrato anterior, todo o estado atual do INPI viraria "novidade" no primeiro dia. A primeira rodada só grava a linha de base.
+- **Resultado truncado no teto de páginas não é "processo sumiu"**: mescle o retrato lido por cima do anterior, senão o que faltou volta como "processo novo" na rodada seguinte.
+- **Zero resultados onde antes havia processos é resposta suspeita, não mudança**: sessão perdida ou resposta parcial do pePI se parecem com "a marca sumiu". O monitor trata isso como erro e preserva o retrato bom.
+- **Sumiço de processo não gera alerta** (só processo novo ou situação alterada) — é o sintoma mais comum de instabilidade, e alertar sobre ele produz ruído recorrente.
+- **Uma consulta pode levar minutos**: o teto de marcas por rodada não basta para a rodada terminar; use também um orçamento de tempo, processando da marca mais desatualizada para a mais recente, para a fila girar entre os dias em vez de a rodada morrer no timeout do runner.
+- O despacho gerado usa o código sintético `PEPI-SITUACAO` (`src/lib/verificacao.ts`), que **não existe na tabela de códigos do INPI** — isso é de propósito: mantém esses registros fora do cálculo de prazos legais (Fase 5), que só pode se basear em código oficial confirmado.
 
 ## Funcionalidades que dependem deste playbook
 

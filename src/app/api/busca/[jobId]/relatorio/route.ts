@@ -18,6 +18,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
       { status: 409 },
     );
   }
+  // O relatório avalia a disponibilidade de UMA marca pesquisada — não faz
+  // sentido para a lista de processos de um titular.
+  if (job.tipoBusca === 'titular') {
+    return NextResponse.json(
+      { erro: 'O relatório Consultor de Marca se aplica a buscas por marca ou processo, não por titular' },
+      { status: 400 },
+    );
+  }
 
   const formato = new URL(request.url).searchParams.get('formato');
   const resultado = job.resultado as unknown as { truncado?: boolean; itens: ItemRelatorio[] };
