@@ -44,7 +44,12 @@ async function tentarBaixar(numero: number, tentativa: number): Promise<Resultad
     }
     buffer = Buffer.from(await response.arrayBuffer());
   } catch (e) {
-    return { status: 'erro', detalhe: `falha de rede: ${(e as Error).message}` };
+    // fetch esconde a causa real (ex: TLS) em error.cause — logue-a sempre.
+    const causa = (e as Error & { cause?: Error }).cause;
+    return {
+      status: 'erro',
+      detalhe: `falha de rede: ${(e as Error).message}${causa ? ` (causa: ${causa.message})` : ''}`,
+    };
   }
 
   // Servidor já devolveu 200 com corpo truncado/HTML — valide o magic number.

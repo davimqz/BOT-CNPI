@@ -4,9 +4,14 @@ name: Ingestão RPI
 
 on:
   schedule:
-    # Terça-feira, 12:00 UTC (09:00 BRT) — a RPI é publicada toda terça.
+    # A RPI é publicada toda terça, mas a infraestrutura do INPI costuma ficar
+    # instável na manhã da publicação (visto em 28/07/2026: site inteiro atrás do
+    # firewall com 403). Três janelas — a ingestão é idempotente, rodada extra não
+    # grava nada em duplicidade.
     # Gotcha: o GitHub desativa `schedule` em repositórios sem atividade há 60+ dias.
-    - cron: '0 12 * * 2'
+    - cron: '0 12 * * 2' # terça 09:00 BRT
+    - cron: '0 17 * * 2' # terça 14:00 BRT
+    - cron: '0 12 * * 3' # quarta 09:00 BRT (rede de segurança)
   workflow_dispatch: {}
 
 jobs:
