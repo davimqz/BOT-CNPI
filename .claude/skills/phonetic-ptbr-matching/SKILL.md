@@ -70,3 +70,61 @@ Construa um conjunto de pares de teste com o resultado esperado (parecido / não
 - Um caso claramente negativo (duas marcas sem nenhuma relação fonética ou textual), para garantir que o threshold não gera falsos positivos triviais
 
 Trate esses pares como testes de regressão permanentes — qualquer ajuste no algoritmo ou no threshold default deve rodar contra eles antes de ser aceito.
+
+---
+
+## Implementação confirmada (Fase 4, 28/07/2026)
+
+Código em `src/lib/similaridade.ts`, regressão em `src/lib/similaridade.test.ts`, integração
+com o job de verificação em `src/lib/verificacao.ts` (`casaPorSimilaridade` / `cruzarDespachos`).
+
+### Como as camadas se combinam
+
+O score final é `max(direta, tokens)`, onde `direta = (textual + fonetico) / 2` e
+`fonetico = max(razão entre os Soundex, razão entre os Metaphone)`.
+
+Três decisões que valem mais que o código, porque foram testadas contra alternativas:
+
+1. **Comparar os códigos fonéticos por razão de sequência, não por igualdade.** Soundex-PT tem
+   só 3 dígitos: exigir igualdade exata joga fora quase-acertos como `HAVAYANA` (H150) vs
+   `HAVAIANAS` (H152), que é justamente o caso que a skill manda capturar.
+2. **Metade textual, metade fonética.** Só fonética casa demais (a espinha consonantal é
+   grosseira: `AVIVANSE` e `HAVAIANAS` colapsam no mesmo `AVNS`); só texto perde `KOKA`/`COCA`.
+   Trocar a média por `max()` foi testado e derruba a precisão sem ganhar recall relevante.
+3. **Tokens só sobem o score, nunca descem** — a camada 5 existe para resgatar marca composta
+   que a comparação global perde, não para vetar casamento que a global já viu.
+
+### Calibração contra dados reais
+
+Sobre 16.668 nomes distintos publicados em edições reais da RPI (RM2897-2899), quantos nomes
+cada threshold acusa como "parecido" com uma marca monitorada:
+
+| Marca monitorada | 65% (liberal) | 80% (padrão) | 90% (rigoroso) |
+|---|---|---|---|
+| NATURA | 62 | 3 | 0 |
+| COCA COLA | 53 | 0 | 0 |
+| HAVAIANAS | 12 | 2 | 0 |
+| ITAU | 13 | 0 | 0 |
+| TRILHA FINANCE | 9 | 0 | 0 |
+
+Leitura prática: **80% é um default honesto** (0-3 alertas por edição, revisáveis à mão); 65%
+gera dezenas de itens por edição e só faz sentido para quem vai triar ativamente; 90% não
+encontrou nada numa base de 16 mil nomes, ou seja, na prática ele só pega grafia quase idêntica.
+
+Custo: ~800ms para comparar uma marca contra 16 mil nomes. `cruzarDespachos` guarda cache por
+`nomeMarca|classeNcl` porque o mesmo nome se repete muito dentro de uma edição.
+
+### Limite conhecido (não é bug)
+
+Marca de uma palavra contra nome de terceiro com palavra extra — `NATURA` vs
+`NATURAH COSMETICOS` — pontua ~63%, abaixo até do liberal, porque a palavra sem par vale zero
+na média da camada de tokens. Esse é o preço de não alertar sobre todo nome que compartilhe uma
+palavra genérica (`BANCO`, `CASA`, `BRASIL`). Para cobrir o caso, use threshold customizado
+(~60%) na marca ou cadastre também a variação composta. Há teste de regressão fixando esse
+comportamento (`LIMITE CONHECIDO:` em `verificacao.test.ts`) — se ele mudar, foi decisão, não acidente.
+
+### Falsos positivos que a fonética produz de propósito
+
+`ZUNATRA`/`VENTURA`/`NURA` contra NATURA (81%), `AVIVANSE` contra HAVAIANAS (85%). Todos têm
+espinha consonantal e/ou Soundex próximos. Não tente eliminá-los com regra ad-hoc: o volume é
+baixo (3 em 16 mil) e a mesma sensibilidade é o que captura uma cópia deliberada.

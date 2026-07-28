@@ -12,6 +12,8 @@ export interface DadosMarca {
   clienteId?: string | null;
   eventosAlerta?: string[];
   ativa?: boolean;
+  similaridadeAtiva?: boolean;
+  similaridadeThreshold?: number | null;
 }
 
 export function validarMarca(
@@ -77,6 +79,29 @@ export function validarMarca(
   if (presente('ativa')) {
     if (typeof body.ativa !== 'boolean') return { erro: 'ativa deve ser true/false' };
     dados.ativa = body.ativa;
+  }
+
+  if (presente('similaridadeAtiva')) {
+    if (typeof body.similaridadeAtiva !== 'boolean') {
+      return { erro: 'similaridadeAtiva deve ser true/false' };
+    }
+    dados.similaridadeAtiva = body.similaridadeAtiva;
+  }
+
+  // Percentual por marca (Fase 4): 65/80/90 são os presets da skill, mas o campo
+  // é livre porque o próprio software de referência aceita valor customizado.
+  // Nulo = usar o padrão de src/lib/similaridade.ts.
+  if (presente('similaridadeThreshold')) {
+    const valor = body.similaridadeThreshold;
+    if (valor === null || valor === '') {
+      dados.similaridadeThreshold = null;
+    } else {
+      const numero = typeof valor === 'string' ? Number(valor) : valor;
+      if (typeof numero !== 'number' || !Number.isFinite(numero) || numero < 50 || numero > 100) {
+        return { erro: 'Threshold de similaridade deve ser um número de 50 a 100' };
+      }
+      dados.similaridadeThreshold = Math.round(numero);
+    }
   }
 
   return { dados };

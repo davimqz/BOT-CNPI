@@ -33,6 +33,8 @@ interface ResumoCruzamento {
   marcasMonitoradas: number;
   despachosCasados: number;
   alertas: number;
+  /** Quantos casaram por semelhança de nome (Fase 4), não pela própria marca. */
+  colidencias: number;
 }
 
 /**
@@ -49,11 +51,19 @@ async function cruzarComMonitoradas(edicaoId: string): Promise<ResumoCruzamento>
     where: { ativa: true, fonteDados: 'rpi' },
     // Ordem estável: em caso de empate, a marca cadastrada primeiro fica com o despacho.
     orderBy: { criadoEm: 'asc' },
-    select: { id: true, nome: true, processo: true, classeNcl: true, eventosAlerta: true },
+    select: {
+      id: true,
+      nome: true,
+      processo: true,
+      classeNcl: true,
+      eventosAlerta: true,
+      similaridadeAtiva: true,
+      similaridadeThreshold: true,
+    },
   });
   if (marcas.length === 0) {
     console.log('[rpi] nenhuma marca monitorada de fonte rpi — nada a cruzar.');
-    return { marcasMonitoradas: 0, despachosCasados: 0, alertas: 0 };
+    return { marcasMonitoradas: 0, despachosCasados: 0, alertas: 0, colidencias: 0 };
   }
 
   const despachos = await prisma.despacho.findMany({
@@ -82,12 +92,28 @@ async function cruzarComMonitoradas(edicaoId: string): Promise<ResumoCruzamento>
   }
 
   const alertas = cruzamentos.filter((c) => c.alerta).length;
+  const porSimilaridade = cruzamentos.filter((c) => c.motivo === 'similaridade');
   const marcasComMovimentacao = new Set(cruzamentos.map((c) => c.marcaId)).size;
   console.log(
     `[rpi] verificação: ${cruzamentos.length} despacho(s) de ${marcasComMovimentacao} marca(s) ` +
       `monitorada(s); ${alertas} com alerta pendente.`,
   );
-  return { marcasMonitoradas: marcas.length, despachosCasados: cruzamentos.length, alertas };
+  // Colidência é um resultado diferente de movimentação própria — mostrar o
+  // score no log é o que permite calibrar o threshold da marca depois.
+  for (const c of porSimilaridade) {
+    const marca = marcas.find((m) => m.id === c.marcaId);
+    const despacho = despachos.find((d) => d.id === c.despachoId);
+    console.log(
+      `[rpi]   colidência ${c.score}% — "${despacho?.nomeMarca}" (processo ${despacho?.processo}) ` +
+        `parecida com "${marca?.nome}"`,
+    );
+  }
+  return {
+    marcasMonitoradas: marcas.length,
+    despachosCasados: cruzamentos.length,
+    alertas,
+    colidencias: porSimilaridade.length,
+  };
 }
 
 async function ingerirEdicao(
@@ -169,14 +195,17 @@ async function recruzarEdicoes(quantidade: number): Promise<void> {
 
   let casados = 0;
   let alertas = 0;
+  let colidencias = 0;
   for (const edicao of edicoes.reverse()) {
     console.log(`[rpi] recruzando edição ${edicao.numero}...`);
     const r = await cruzarComMonitoradas(edicao.id);
     casados += r.despachosCasados;
     alertas += r.alertas;
+    colidencias += r.colidencias;
   }
   console.log(
-    `[rpi] recruzamento concluído: ${casados} despacho(s) vinculado(s), ${alertas} com alerta pendente.`,
+    `[rpi] recruzamento concluído: ${casados} despacho(s) vinculado(s), ${alertas} com alerta ` +
+      `pendente, ${colidencias} por semelhança de nome.`,
   );
 }
 
@@ -204,6 +233,7 @@ async function main() {
   const processadas: number[] = [];
   let despachosCasados = 0;
   let alertas = 0;
+  let colidencias = 0;
 
   try {
     let alvo = await determinarProximaEdicao();
@@ -214,6 +244,7 @@ async function main() {
       processadas.push(alvo);
       despachosCasados += r.despachosCasados;
       alertas += r.alertas;
+      colidencias += r.colidencias;
     }
 
     await prisma.logExecucao.update({
@@ -221,9 +252,9 @@ async function main() {
       data: {
         status: 'sucesso',
         mensagem: processadas.length
-          ? `Edições processadas: ${processadas.join(', ')} — ${despachosCasados} despacho(s) de marcas monitoradas, ${alertas} com alerta`
+          ? `Edições processadas: ${processadas.join(', ')} — ${despachosCasados} despacho(s) de marcas monitoradas, ${alertas} com alerta, ${colidencias} por semelhança de nome`
           : 'Nenhuma edição nova publicada',
-        detalhes: { processadas, despachosCasados, alertas },
+        detalhes: { processadas, despachosCasados, alertas, colidencias },
         finalizadoEm: new Date(),
       },
     });

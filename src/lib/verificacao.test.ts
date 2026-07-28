@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   casaComMarca,
+  casaPorSimilaridade,
   classesDe,
   cruzarDespachos,
   normalizarNomeMarca,
@@ -80,18 +81,103 @@ test('cruzarDespachos: só marca alerta para os eventos escolhidos', () => {
   ];
 
   assert.deepEqual(cruzarDespachos(marcas, despachos), [
-    { despachoId: 'd-deferimento', marcaId: 'so-deferimento', alerta: true },
-    { despachoId: 'd-oposicao', marcaId: 'so-deferimento', alerta: false },
-    { despachoId: 'd-outra-marca', marcaId: 'todos', alerta: true },
+    { despachoId: 'd-deferimento', marcaId: 'so-deferimento', alerta: true, motivo: 'processo' },
+    { despachoId: 'd-oposicao', marcaId: 'so-deferimento', alerta: false, motivo: 'processo' },
+    { despachoId: 'd-outra-marca', marcaId: 'todos', alerta: true, motivo: 'processo' },
   ]);
 });
 
 test('cruzarDespachos: primeiro casamento vence quando duas marcas casam', () => {
   const marcas = [marca({ id: 'antiga' }), marca({ id: 'duplicada' })];
   const cruzamentos = cruzarDespachos(marcas, [despacho()]);
-  assert.deepEqual(cruzamentos, [{ despachoId: 'd1', marcaId: 'antiga', alerta: true }]);
+  assert.deepEqual(cruzamentos, [
+    { despachoId: 'd1', marcaId: 'antiga', alerta: true, motivo: 'nome' },
+  ]);
 });
 
 test('cruzarDespachos: sem marcas monitoradas não faz trabalho nenhum', () => {
   assert.deepEqual(cruzarDespachos([], [despacho()]), []);
+});
+
+// --- Fase 4: similaridade -------------------------------------------------
+
+test('casaPorSimilaridade: só vale com a similaridade ligada na marca', () => {
+  const d = despacho({ nomeMarca: 'NATURAH', classeNcl: null });
+  assert.equal(casaPorSimilaridade(marca(), d).casa, false);
+  assert.equal(casaPorSimilaridade(marca({ similaridadeAtiva: true }), d).casa, true);
+});
+
+test('casaPorSimilaridade: respeita o threshold da própria marca', () => {
+  const d = despacho({ nomeMarca: 'HAVAIANAS', classeNcl: null });
+  const m = (threshold: number | null) =>
+    marca({ nome: 'HAVAYANA', similaridadeAtiva: true, similaridadeThreshold: threshold });
+  assert.equal(casaPorSimilaridade(m(65), d).casa, true);
+  assert.equal(casaPorSimilaridade(m(null), d).casa, true); // nulo = padrão (80%)
+  assert.equal(casaPorSimilaridade(m(90), d).casa, false);
+});
+
+test('casaPorSimilaridade: classe NCL diferente é outro ramo, não colidência', () => {
+  const m = marca({ similaridadeAtiva: true, classeNcl: '3' });
+  assert.equal(casaPorSimilaridade(m, despacho({ nomeMarca: 'NATURAH', classeNcl: '3' })).casa, true);
+  assert.equal(casaPorSimilaridade(m, despacho({ nomeMarca: 'NATURAH', classeNcl: '35' })).casa, false);
+});
+
+test('cruzarDespachos: colidência vira alerta marcado como similaridade', () => {
+  const marcas = [marca({ id: 'natura', similaridadeAtiva: true, classeNcl: '3' })];
+  const cruzamentos = cruzarDespachos(marcas, [
+    despacho({ id: 'd-copia', processo: '999999999', nomeMarca: 'NATURAH' }),
+    despacho({ id: 'd-nada-a-ver', processo: '988888888', nomeMarca: 'BANCO DO BRASIL' }),
+  ]);
+  assert.equal(cruzamentos.length, 1);
+  assert.equal(cruzamentos[0].despachoId, 'd-copia');
+  assert.equal(cruzamentos[0].motivo, 'similaridade');
+  assert.equal(cruzamentos[0].alerta, true);
+  assert.ok((cruzamentos[0].score ?? 0) >= 80);
+});
+
+test('cruzarDespachos: casamento exato tem precedência sobre similaridade', () => {
+  // A marca "parecida" vem primeiro na lista de propósito: mesmo assim o
+  // despacho pertence a quem casa exato.
+  const marcas = [
+    marca({ id: 'parecida', nome: 'NATURAH', similaridadeAtiva: true }),
+    marca({ id: 'dona', nome: 'NATURA', processo: '912345678' }),
+  ];
+  const cruzamentos = cruzarDespachos(marcas, [despacho({ nomeMarca: 'NATURA' })]);
+  assert.deepEqual(cruzamentos, [
+    { despachoId: 'd1', marcaId: 'dona', alerta: true, motivo: 'processo' },
+  ]);
+});
+
+test('cruzarDespachos: entre marcas parecidas, a de maior score leva o despacho', () => {
+  const marcas = [
+    marca({ id: 'longe', nome: 'NATURAL', similaridadeAtiva: true }),
+    marca({ id: 'perto', nome: 'NATURA', similaridadeAtiva: true }),
+  ];
+  const cruzamentos = cruzarDespachos(marcas, [
+    despacho({ processo: '999999999', nomeMarca: 'NATURAH' }),
+  ]);
+  assert.equal(cruzamentos.length, 1);
+  assert.equal(cruzamentos[0].marcaId, 'perto');
+});
+
+test('LIMITE CONHECIDO: palavra extra no nome de terceiro derruba o score', () => {
+  // "NATURAH COSMETICOS" é uma colidência real contra "NATURA", mas a palavra
+  // sem par custa metade da nota da camada de tokens e o score fica ~63% —
+  // abaixo até do threshold liberal. Não é bug: é o preço de não alertar sobre
+  // todo nome que compartilhe uma palavra genérica ("BANCO", "CASA", "BRASIL").
+  // Para cobrir esse caso, use threshold customizado (~60%) na marca ou cadastre
+  // também a variação composta.
+  const marcas = [marca({ id: 'natura', similaridadeAtiva: true, similaridadeThreshold: 65 })];
+  const despachos = [despacho({ processo: '999999999', nomeMarca: 'NATURAH COSMETICOS' })];
+  assert.deepEqual(cruzarDespachos(marcas, despachos), []);
+
+  marcas[0].similaridadeThreshold = 60;
+  assert.equal(cruzarDespachos(marcas, despachos).length, 1);
+});
+
+test('cruzarDespachos: sem similaridade ligada, nome parecido continua sendo ignorado', () => {
+  const cruzamentos = cruzarDespachos([marca()], [
+    despacho({ processo: '999999999', nomeMarca: 'NATURAH' }),
+  ]);
+  assert.deepEqual(cruzamentos, []);
 });

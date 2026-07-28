@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { EVENTOS_ALERTA, eventoPorSlug } from '@/lib/eventos-alerta';
+import { THRESHOLD_PADRAO, THRESHOLDS } from '@/lib/similaridade';
 
 // CRUD de marcas monitoradas (Fase 3). A fonte de dados padrão é a RPI semanal —
 // scraping do pePI é último recurso, só para quem precisa de detecção mais
@@ -24,6 +25,8 @@ interface Marca {
   cliente: Cliente | null;
   eventosAlerta: string[];
   ativa: boolean;
+  similaridadeAtiva: boolean;
+  similaridadeThreshold: number | null;
 }
 
 interface FormMarca {
@@ -34,6 +37,8 @@ interface FormMarca {
   fonteDados: 'rpi' | 'scraping';
   clienteId: string;
   eventosAlerta: string[];
+  similaridadeAtiva: boolean;
+  similaridadeThreshold: number;
 }
 
 interface ResultadoImportacao {
@@ -50,6 +55,8 @@ const FORM_VAZIO: FormMarca = {
   fonteDados: 'rpi',
   clienteId: '',
   eventosAlerta: [],
+  similaridadeAtiva: false,
+  similaridadeThreshold: THRESHOLD_PADRAO,
 };
 
 function resumoEventos(eventosAlerta: string[]): string {
@@ -101,6 +108,8 @@ export default function MarcasPage() {
       fonteDados: m.fonteDados,
       clienteId: m.clienteId ?? '',
       eventosAlerta: m.eventosAlerta,
+      similaridadeAtiva: m.similaridadeAtiva,
+      similaridadeThreshold: m.similaridadeThreshold ?? THRESHOLD_PADRAO,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -381,6 +390,59 @@ export default function MarcasPage() {
             </div>
           </div>
         </fieldset>
+        <fieldset className="mt-4" disabled={salvando}>
+          <span className="mb-1 block opacity-70">Marcas parecidas (colidência)</span>
+          <div className="rounded border border-black/20 p-3 dark:border-white/20">
+            <label className="flex cursor-pointer items-center gap-1.5 font-medium">
+              <input
+                type="checkbox"
+                checked={form.similaridadeAtiva}
+                onChange={(e) => setForm({ ...form, similaridadeAtiva: e.target.checked })}
+              />
+              Alertar também quando um terceiro depositar um nome parecido
+            </label>
+            <p className="mb-2 mt-1 text-xs opacity-60">
+              Compara fonética e grafia (KOKA KOLA ≈ COCA COLA) contra os nomes publicados na RPI,
+              dentro da mesma classe NCL quando ela estiver preenchida. Desligado, a marca só recebe
+              alerta da própria movimentação.
+            </p>
+            {form.similaridadeAtiva && (
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                {(
+                  [
+                    [THRESHOLDS.liberal, 'Liberal', 'pega mais cópias, com mais falso positivo'],
+                    [THRESHOLDS.padrao, 'Padrão', 'equilíbrio recomendado'],
+                    [THRESHOLDS.rigoroso, 'Rigoroso', 'menos ruído, deixa passar variação sutil'],
+                  ] as const
+                ).map(([valor, rotulo, dica]) => (
+                  <label key={valor} className="flex cursor-pointer items-center gap-1.5" title={dica}>
+                    <input
+                      type="radio"
+                      name="similaridadeThreshold"
+                      checked={form.similaridadeThreshold === valor}
+                      onChange={() => setForm({ ...form, similaridadeThreshold: valor })}
+                    />
+                    {rotulo} ({valor}%)
+                  </label>
+                ))}
+                <label className="flex items-center gap-1.5">
+                  Customizado:
+                  <input
+                    type="number"
+                    min={50}
+                    max={100}
+                    value={form.similaridadeThreshold}
+                    onChange={(e) =>
+                      setForm({ ...form, similaridadeThreshold: Number(e.target.value) })
+                    }
+                    className="w-20 rounded border border-black/20 bg-transparent px-2 py-1 dark:border-white/20"
+                  />
+                  %
+                </label>
+              </div>
+            )}
+          </div>
+        </fieldset>
         {form.fonteDados === 'scraping' && (
           <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
             Scraping do pePI é a opção de último recurso (mais frágil e sujeita a bloqueio) — use
@@ -470,6 +532,7 @@ export default function MarcasPage() {
               <th className="px-3 py-2 font-medium">Fonte</th>
               <th className="px-3 py-2 font-medium">Cliente</th>
               <th className="px-3 py-2 font-medium">Alertas</th>
+              <th className="px-3 py-2 font-medium">Parecidas</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Ações</th>
             </tr>
@@ -489,6 +552,11 @@ export default function MarcasPage() {
                   ) : (
                     <span className="line-clamp-2">{resumoEventos(m.eventosAlerta)}</span>
                   )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2">
+                  {m.similaridadeAtiva
+                    ? `≥ ${m.similaridadeThreshold ?? THRESHOLD_PADRAO}%`
+                    : '—'}
                 </td>
                 <td className="px-3 py-2">
                   <span
@@ -522,7 +590,7 @@ export default function MarcasPage() {
             ))}
             {!carregando && marcas.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center opacity-60">
+                <td colSpan={10} className="px-3 py-8 text-center opacity-60">
                   Nenhuma marca cadastrada ainda — adicione a primeira no formulário acima.
                 </td>
               </tr>

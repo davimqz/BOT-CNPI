@@ -70,14 +70,14 @@ Lista de tarefas detalhada, organizada nas mesmas 10 fases definidas no document
 
 ## Fase 4 — Motor de similaridade *(skill: `phonetic-ptbr-matching`)*
 
-- [ ] Implementar a função de normalização (remoção de acento, K→C, W→V, PH→F) como função pura testável.
-- [ ] Implementar comparação de texto tipo `SequenceMatcher`.
-- [ ] Implementar Soundex-PT conforme a tabela de dígitos confirmada na skill.
-- [ ] Implementar Metaphone-PT (LH→I, NH→N, CH→X, E inicial mudo, remoção de vogais internas).
-- [ ] Implementar comparação por tokens para marcas compostas.
-- [ ] Construir o conjunto de testes de regressão descrito na skill (KOKA KOLA / COCA COLA, NATURAH / NATURA, HAVAYANA / HAVAIANAS, caso de token comum, caso negativo).
-- [ ] Expor o threshold (65/80/90% + customizado) como parâmetro configurável por marca monitorada, não como constante global.
-- [ ] Integrar o motor de similaridade ao job de verificação da Fase 3 (rodar contra despachos novos quando a marca tiver similaridade ativada).
+- [x] Implementar a função de normalização (remoção de acento, K→C, W→V, PH→F) como função pura testável — `normalizar` em `src/lib/similaridade.ts`; ao contrário de `normalizarNomeMarca` (verificacao.ts), preserva o espaço porque a camada de tokens precisa saber onde a palavra termina, e pontuação vira separador.
+- [x] Implementar comparação de texto tipo `SequenceMatcher` — `razaoSequencia`, a mesma fórmula `2·M/T` do `difflib.ratio()`, com o mesmo desempate (primeiro bloco em caso de empate). Não implementa o "autojunk" do Python (só vale acima de 200 itens; nome de marca nunca chega perto).
+- [x] Implementar Soundex-PT conforme a tabela de dígitos confirmada na skill — `soundexPt`, formato clássico inicial + 3 dígitos. A tabela é menor que a do Soundex original porque a normalização já resolveu K→C e W→V.
+- [x] Implementar Metaphone-PT (LH→I, NH→N, CH→X, E inicial mudo, remoção de vogais internas) — `metaphonePt`; o H solto também cai (mudo em português), o que faz NATURAH e NATURA colapsarem no mesmo `NTR`.
+- [x] Implementar comparação por tokens para marcas compostas — `compararTokens`, pareamento guloso com uso exclusivo e média dividida pelo total de palavras da MAIOR: palavra sem par vale zero, então "TRILHA" não pontua 100% contra "TRILHA FINANCE" só por conter uma palavra em comum.
+- [x] Construir o conjunto de testes de regressão descrito na skill (KOKA KOLA / COCA COLA, NATURAH / NATURA, HAVAYANA / HAVAIANAS, caso de token comum, caso negativo) — `src/lib/similaridade.test.ts`, 8 pares de regressão (verificados também na ordem inversa, o veredito é simétrico) + testes por camada. Score final = `max(direta, tokens)` com `direta = (textual + fonético)/2`; o racional de cada decisão está na skill.
+- [x] Expor o threshold (65/80/90% + customizado) como parâmetro configurável por marca monitorada, não como constante global — colunas `similaridade_ativa`/`similaridade_threshold` já existiam no schema (sem migration nova); validação em `src/lib/marcas.ts` (50-100, nulo = padrão) e seção própria no formulário de `/marcas` com os 3 presets + campo livre.
+- [x] Integrar o motor de similaridade ao job de verificação da Fase 3 (rodar contra despachos novos quando a marca tiver similaridade ativada) — `casaPorSimilaridade` + segunda passada em `cruzarDespachos`: **todo casamento exato é resolvido antes de qualquer comparação por similaridade**, senão uma marca com similaridade ligada roubaria o despacho de outra só por vir antes na lista. Entre várias parecidas vence a de maior score; a classe NCL continua filtrando (colidência é conflito dentro do mesmo ramo). O `motivo` do cruzamento (`processo`/`nome`/`similaridade`) vai no resultado para a Fase 6 não apresentar colidência como movimentação própria, e o `ingest:rpi` loga cada colidência com o score. Calibrado contra 16.668 nomes reais da RPI: no padrão de 80% uma marca acusa 0-3 parecidas por edição (65% acusa dezenas, 90% não acusou nada) — tabela completa na skill.
 
 **Critério de pronto**: todos os pares de teste da skill retornam o resultado esperado (parecido/não parecido).
 
