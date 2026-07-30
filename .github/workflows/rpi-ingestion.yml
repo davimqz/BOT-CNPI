@@ -34,3 +34,19 @@ jobs:
         run: npm run ingest:rpi --if-present
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # Aqui, e não num workflow à parte: o alerta precisa sair junto da detecção.
+      # O que falhar continua na fila e é reprocessado pelo alertas.yml diário.
+      - name: Enviar alertas da edição processada
+        run: npm run alertas:enviar
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          EMAIL_RESPONDER_PARA: ${{ secrets.EMAIL_RESPONDER_PARA }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_CRIPTOGRAFIA: ${{ secrets.SMTP_CRIPTOGRAFIA }}

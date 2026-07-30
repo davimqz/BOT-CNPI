@@ -1,0 +1,52 @@
+# Envio dos alertas de movimentação (Fase 6 do TASKS.md).
+#
+# A fila (`despachos.alerta_pendente`) é esvaziada logo depois de cada detecção,
+# dentro do rpi-ingestion.yml e do pepi-monitor.yml — este workflow é a REDE DE
+# SEGURANÇA, não o caminho principal: alerta que falhou no envio permanece na
+# fila de propósito (chave inválida, Resend fora do ar, destinatário recusado), e
+# sem uma rodada própria ele só sairia na próxima terça. Prazo de exigência
+# formal vence em 5 dias (LPI art. 157) — esperar a semana seguinte perderia o
+# prazo que o alerta existe para avisar.
+name: Alertas de movimentação
+
+on:
+  schedule:
+    # Gotcha: o GitHub desativa `schedule` em repositórios sem atividade há 60+ dias.
+    - cron: '30 11 * * *' # todo dia 08:30 BRT (depois do monitor pePI das 08:00)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Só imprimir os alertas, sem enviar e sem esvaziar a fila'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Enviar alertas pendentes
+        run: npm run alertas:enviar -- ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Provedor padrão. Bastam estes dois secrets para o envio funcionar.
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          EMAIL_RESPONDER_PARA: ${{ secrets.EMAIL_RESPONDER_PARA }}
+          # Fallback: só entra em ação se os dois acima estiverem vazios.
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_CRIPTOGRAFIA: ${{ secrets.SMTP_CRIPTOGRAFIA }}

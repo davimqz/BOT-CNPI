@@ -62,8 +62,25 @@ export const EVENTOS_ALERTA: EventoAlerta[] = [
 
 const POR_SLUG = new Map(EVENTOS_ALERTA.map((e) => [e.slug, e]));
 
+const POR_CODIGO = new Map(
+  EVENTOS_ALERTA.flatMap((e) => e.codigos.map((c) => [c, e] as const)),
+);
+
 export function eventoPorSlug(slug: string): EventoAlerta | undefined {
   return POR_SLUG.get(slug);
+}
+
+export function eventoPorCodigo(codigo: string): EventoAlerta | undefined {
+  return POR_CODIGO.get(codigo);
+}
+
+/**
+ * Nome legível de um código de despacho, para o alerta da Fase 6 quando a RPI
+ * publica o despacho sem texto. Código não mapeado devolve o próprio código: é
+ * pouco informativo, mas honesto — melhor que inventar uma descrição.
+ */
+export function rotuloDoCodigo(codigo: string): string {
+  return POR_CODIGO.get(codigo)?.rotulo ?? codigo;
 }
 
 // Decide se um despacho recém-ingerido deve gerar alerta para uma marca,

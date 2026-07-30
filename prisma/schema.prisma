@@ -197,6 +197,16 @@ model ConfiguracaoAlerta {
   emailHabilitado         Boolean  @default(false) @map("email_habilitado")
   whatsappHabilitado      Boolean  @default(false) @map("whatsapp_habilitado")
   popupHabilitado         Boolean  @default(true) @map("popup_habilitado")
+  // Até quando o usuário já viu as novidades no pop-up (Fase 6). Nulo = nunca
+  // marcou nada como visto. É o estado do canal "pop-up", que NÃO pode se apoiar
+  // em `despachos.alerta_pendente`: aquela fila é zerada pelo envio de e-mail, e
+  // um pop-up que lê a fila apagaria justamente quando o e-mail volta a
+  // funcionar. Ver src/lib/novidades.ts.
+  alertasVistosEm         DateTime? @map("alertas_vistos_em")
+  // ESCOPO REMOVIDO (28/07/2026, ver TASKS.md Fase 6): o delay configurável de
+  // e-mail não foi construído — num sistema de prazos ele só permite piorar o
+  // alerta, e o melhor valor é sempre 0. A coluna permanece porque removê-la
+  // custa uma migration sem nenhum ganho; não implemente em cima dela.
   delayEmailMinutos       Int      @default(0) @map("delay_email_minutos")
   intervaloWhatsappSeg    Int      @default(30) @map("intervalo_whatsapp_seg")
   smtpHost                String?  @map("smtp_host")
