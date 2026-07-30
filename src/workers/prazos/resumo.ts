@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { listarPrazos } from '@/lib/prazos-consulta';
 import { gerarResumoPrazos } from '@/lib/relatorio/resumo-prazos';
 import { carregarConfigEmail, descreverConfig, destinatarioPadrao, enviarEmail } from '@/lib/email';
+import { canalEmailLiberado } from '@/lib/configuracao-alertas';
 
 /**
  * "Resumo por e-mail" dos prazos pendentes (Fase 5).
@@ -50,6 +51,15 @@ async function main() {
   // semanal é a forma mais rápida de o usuário criar uma regra de arquivamento.
   if (prazos.length === 0) {
     console.log('[prazos] nenhum prazo na janela — resumo não enviado.');
+    return;
+  }
+
+  // O interruptor da tela é do canal inteiro, não só do alerta de movimentação:
+  // "desliguei o e-mail" e continuar recebendo o resumo semanal seria o tipo de
+  // surpresa que faz o usuário criar uma regra de arquivamento — e a partir daí
+  // ele não lê mais nem o alerta que importa.
+  if (!(await canalEmailLiberado())) {
+    console.warn('[prazos] canal de e-mail desligado nas Configurações de Alertas — resumo não enviado.');
     return;
   }
 

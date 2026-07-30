@@ -45,12 +45,21 @@ export default function Home() {
             Prazos legais abertos pelos despachos das marcas monitoradas
           </span>
         </Link>
+        <Link
+          href="/configuracoes"
+          className="inline-block rounded border border-black/15 px-4 py-3 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+        >
+          <span className="block font-medium">Configurações de Alertas</span>
+          <span className="block text-sm opacity-70">
+            Por onde o sistema avisa quando detecta movimentação
+          </span>
+        </Link>
       </nav>
       <section className="space-y-2 text-sm opacity-80">
         <p>Próximos módulos, na ordem do TASKS.md:</p>
         <ul className="list-inside list-disc space-y-1">
-          <li>Fase 3 — Eventos de alerta, importação em lote e job de verificação</li>
-          <li>Fase 4 — Motor de similaridade fonética</li>
+          <li>Fase 6 — WhatsApp pela Cloud API da Meta (depende de aprovação externa)</li>
+          <li>Fase 9 — Deploy no Vercel e validação em paralelo com a RPI real</li>
         </ul>
       </section>
     </main>

@@ -4,6 +4,7 @@ import { agruparAlertas, type DespachoPendente, type GrupoAlerta } from '@/lib/a
 import { gerarAlertaDespacho } from '@/lib/relatorio/alerta-despacho';
 import { DEFINICOES_PRAZO, type TipoPrazo } from '@/lib/prazos';
 import { carregarConfigEmail, descreverConfig, enviarEmail } from '@/lib/email';
+import { canalEmailLiberado } from '@/lib/configuracao-alertas';
 
 /**
  * Envio dos alertas de movimentação (Fase 6).
@@ -131,6 +132,18 @@ async function main() {
       console.log(`--- assunto ---\n${email.assunto}`);
       console.log(`--- texto ---\n${email.texto}`);
     }
+    return;
+  }
+
+  // Canal desligado na tela de Configurações de Alertas: mesma conduta de
+  // "sem credencial" — a fila FICA cheia. Desligar um canal é escolher não
+  // receber agora, não autorizar o descarte de aviso de prazo; e o pop-up
+  // continua mostrando tudo, porque não lê esta fila (src/lib/novidades.ts).
+  if (!(await canalEmailLiberado())) {
+    console.warn(
+      `[alertas] canal de e-mail desligado nas Configurações de Alertas — ${fila.length} ` +
+        'alerta(s) mantidos na fila (visíveis no aviso da tela).',
+    );
     return;
   }
 

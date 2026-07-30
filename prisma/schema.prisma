@@ -194,7 +194,10 @@ model Template {
 model ConfiguracaoAlerta {
   id                      String   @id @default(cuid())
   usuarioId               String   @unique @map("usuario_id")
-  emailHabilitado         Boolean  @default(false) @map("email_habilitado")
+  // Consultado pelos workers antes de enviar (canalEmailLiberado). Default
+  // `true` porque o padrão de um sistema de prazos é avisar: silêncio só por
+  // escolha explícita na tela de Configurações de Alertas.
+  emailHabilitado         Boolean  @default(true) @map("email_habilitado")
   whatsappHabilitado      Boolean  @default(false) @map("whatsapp_habilitado")
   popupHabilitado         Boolean  @default(true) @map("popup_habilitado")
   // Até quando o usuário já viu as novidades no pop-up (Fase 6). Nulo = nunca
