@@ -39,10 +39,17 @@ export default async function ConfiguracoesPage() {
           ficar no banco nem numa tela. O software de referência pedia SMTP ao usuário porque é um
           app desktop, sem servidor próprio para enviar; aqui essa restrição não existe.
         </p>
-        <p>
+        <p className="mb-2">
           Para trocar o destinatário, use <code>RESUMO_PRAZOS_PARA</code> ou o e-mail do usuário
-          cadastrado. Para testar o canal isoladamente do conteúdo:{' '}
-          <code>npm run email:teste</code>.
+          cadastrado.
+        </p>
+        <p>
+          <strong>O que o diagnóstico de e-mail acima cobre.</strong> Ele lê o ambiente{' '}
+          <em>deste aplicativo</em>. Quem envia os alertas é o worker no GitHub Actions, usando os{' '}
+          <em>secrets do repositório</em> — em produção são dois ambientes separados, e o estado
+          aqui pode divergir do envio real se os dois saírem de sincronia. A prova de ponta a ponta
+          é o workflow <code>E-mail de teste</code>, que roda no mesmo lugar que os alertas: dispare
+          pela aba Actions e confira a caixa de entrada.
         </p>
       </section>
     </main>

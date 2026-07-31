@@ -32,7 +32,7 @@ Sempre que estiver em dúvida sobre qual fonte usar para uma nova funcionalidade
 | Banco de dados | PostgreSQL via Neon (free tier) + Prisma | Tipagem forte do modelo de dados (Seção 4) direto no TypeScript. Neon suspende sozinho quando ocioso — sem custo parado. |
 | Fila/agendamento | **Dispensada na variante gratuita** — opcional (BullMQ + Upstash Redis) só na Fase 8 (multiusuário) | O GitHub Actions já cumpre o papel de "fila": o agendamento roda o job da RPI, e o `workflow_dispatch` roda a busca sob demanda. Não adicione Redis/BullMQ antes de precisar de concorrência real entre vários usuários. |
 | E-mail | **Resend** (API HTTP) como padrão; Nodemailer/SMTP como fallback | Ver Seção 3.2 — decisão revista em 28/07/2026. O usuário final não configura envio; a credencial é do operador. |
-| WhatsApp | Cloud API oficial da Meta (1.000 conversas de serviço grátis/mês) | **Não** usar automação de WhatsApp Web — ver justificativa na Seção 5. |
+| WhatsApp | Cloud API oficial da Meta | **Não** usar automação de WhatsApp Web — ver justificativa na Seção 5. Sobre a franquia grátis, ver a ressalva na Seção 3.3. |
 | Armazenamento de arquivos | Bucket compatível com S3 | Logos e templates enviados pelo usuário (módulo de personalização) — só necessário a partir da Fase 7. |
 
 ### 3.1 Variante $0/mês — por que existe e o que ela muda
@@ -41,7 +41,7 @@ Todo o stack acima cabe em tiers gratuitos para uso pessoal (um usuário, uma ma
 
 - **Ingestão semanal da RPI**: workflow agendado (`.github/workflows/rpi-ingestion.yml`), dispara toda terça, roda em runner Ubuntu (sem limite de 60s — o limite de job do GitHub Actions é de horas, não segundos), grava direto no Neon.
 - **Consulta ao vivo / busca manual**: quando o usuário busca algo pela interface, o Next.js dispara um workflow via `workflow_dispatch` (chamada à API REST do GitHub, usando um token com permissão de `actions: write` no repositório), passando o termo buscado; o workflow roda a busca no pePI e grava o resultado no Postgres; o frontend faz polling curto até o resultado aparecer. Isso adiciona uma latência de alguns segundos a dezenas de segundos (tempo de fila do runner) comparado a uma função serverless tradicional — aceitável para uso pessoal, não para um produto que promete resposta instantânea.
-- Limites de referência (confirmados em julho de 2026, reconferir periodicamente pois tiers gratuitos mudam): Vercel Hobby (1M invocações/mês, função de até 60s), Neon free (0,5GB armazenamento, 100h de computação/mês, auto-suspende após 5 min ocioso), GitHub Actions (2.000 min grátis/mês em repositório privado, ilimitado em repositório público), Meta Cloud API (1.000 conversas de serviço grátis/mês).
+- Limites de referência (confirmados em julho de 2026, reconferir periodicamente pois tiers gratuitos mudam): Vercel Hobby (1M invocações/mês, função de até 60s), Neon free (0,5GB armazenamento, 100h de computação/mês, auto-suspende após 5 min ocioso), GitHub Actions (2.000 min grátis/mês em repositório privado, ilimitado em repositório público). Para a Meta Cloud API, ver a ressalva da Seção 3.3 — a franquia citada aqui antes não cobria o nosso tipo de mensagem.
 - **Monitoramento diário das marcas de fonte `scraping`**: workflow agendado (`.github/workflows/pepi-monitor.yml`), roda `npm run monitor:pepi` uma vez ao dia. As marcas de fonte `rpi` não passam por aqui — elas são cruzadas dentro do próprio `rpi-ingestion.yml`. Frequência fina ("a cada 15 minutos") não é possível nesta variante: `schedule` do GitHub é best-effort e cada marca abre um navegador contra o pePI.
 - Os três workflows (`rpi-ingestion.yml`, `pepi-search.yml`, `pepi-monitor.yml`) vivem em `.github/workflows/` — ver `TASKS.md` para o estado de cada fase.
 
@@ -81,6 +81,41 @@ prazos.
 
 Limites de referência (julho/2026, reconferir): Resend free 3.000 e-mails/mês (100/dia, 1
 domínio); Brevo free 300/dia. O volume real deste sistema é de dezenas de e-mails por mês.
+
+### 3.3 Deploy: dois ambientes, não um (escrito em 31/07/2026, Fase 9)
+
+A regra que mais importa aqui, e que não é óbvia lendo só o código: **o app e os workers rodam em
+ambientes diferentes, com configurações diferentes.**
+
+- O **app no Vercel** lê as *Environment Variables* do projeto Vercel.
+- Os **workers** (ingestão da RPI, monitor do pePI, alertas, resumo, e-mail de teste) rodam no
+  **GitHub Actions** e leem os *secrets do repositório*.
+
+Os dois precisam das mesmas credenciais de e-mail, pelo mesmo motivo por caminhos opostos: o
+worker precisa para *enviar*, e o app precisa para a tela de Configurações de Alertas conseguir
+*diagnosticar* o canal. Se saírem de sincronia, a tela e a realidade divergem — e o modo de falha
+perigoso é o silencioso: tela dizendo "ativo" enquanto nenhum alerta sai. Por isso o diagnóstico da
+tela é redigido como "este app enxerga…", nunca como "o alerta vai sair", e a prova de ponta a
+ponta é o workflow `email-teste.yml`, que roda **no mesmo lugar que os alertas**. Ver
+`src/lib/configuracao-alertas.ts`.
+
+Variáveis do projeto no Vercel: `DATABASE_URL`, `AUTH_EMAIL`, `AUTH_PASSWORD`, `AUTH_SECRET`,
+`GITHUB_PAT`, `GITHUB_REPO`, `RESEND_API_KEY`, `EMAIL_REMETENTE` (e `EMAIL_RESPONDER_PARA` /
+`RESUMO_PRAZOS_PARA` se usadas). `DATABASE_URL_DIRECT` é só do Prisma CLI (migrations), não do
+runtime.
+
+**`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` no Vercel**: o Vercel instala devDependencies para buildar,
+e o pacote `playwright` baixa navegadores na instalação — centenas de MB de build para algo que o
+Vercel **nunca** executa (Seção 5: nenhum Playwright em função serverless). Nos workflows do
+Actions o download continua acontecendo de propósito, via `npx playwright install --with-deps
+chromium`.
+
+**Sobre a franquia grátis do WhatsApp**: a Seção 3 citava "1.000 conversas de serviço grátis/mês"
+como parte da justificativa da Cloud API. Conversa *de serviço* é a iniciada pelo usuário; os
+alertas deste sistema são templates *utility* iniciados pelo negócio, que não caem nessa franquia
+na maioria dos mercados. No volume real (dezenas por mês) a diferença é irrelevante, mas a premissa
+estava errada e não deve sustentar nenhuma decisão futura. Reconferir o preço vigente antes de
+registrar qualquer número aqui.
 
 ## 4. Modelo de dados
 

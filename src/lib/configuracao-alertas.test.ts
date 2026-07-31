@@ -36,6 +36,13 @@ test('desligado tem precedência sobre a falta de credencial', () => {
   assert.equal(d.situacao, 'desligado');
 });
 
+test('o diagnóstico fala do app, não promete que o alerta vai sair', () => {
+  // Quem envia é o worker no Actions, com os secrets do repositório: em
+  // produção são outro ambiente. Prometer "o alerta vai sair" a partir do que
+  // o app enxerga seria afirmar o que este código não tem como saber.
+  assert.match(diagnosticarEmail(email()).detalhe, /este app/i);
+});
+
 test('ligado sem provedor é "incompleto" e nomeia as variáveis que faltam', () => {
   // Este é o modo de falha que a tela existe para expor: tudo parece
   // configurado e nenhum alerta sai.

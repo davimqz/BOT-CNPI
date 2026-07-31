@@ -19,6 +19,17 @@
  * Nenhuma credencial vaza para a tela: daqui sai o *nome* do provedor e o
  * remetente, nunca a chave (CLAUDE.md Seção 3.2 — a chave do Resend autoriza
  * envio pelo domínio inteiro e vive só no ambiente).
+ *
+ * LIMITE DO DIAGNÓSTICO, e ele é importante em produção: o que se lê aqui é o
+ * ambiente **do app web** (Vercel). Quem envia de verdade é o worker no GitHub
+ * Actions, com os *secrets do repositório* — em desenvolvimento os dois são o
+ * mesmo `.env`, em produção são ambientes separados. Então este diagnóstico
+ * responde "o app enxerga um provedor?", não "o alerta vai sair?", e pode
+ * divergir do envio real se as duas configurações saírem de sincronia. Por isso
+ * os textos abaixo falam do app, e a tela remete ao `email-teste.yml` (que roda
+ * no runner) para a prova de ponta a ponta. Se um dia isto precisar afirmar o
+ * envio real, o caminho é o worker registrar o resultado da última rodada no
+ * banco e a tela ler esse registro — nunca inferir do próprio ambiente.
  */
 
 import { prisma } from './db';
@@ -73,7 +84,7 @@ export function diagnosticarEmail(e: EstadoEmail): Diagnostico {
     return {
       situacao: 'incompleto',
       detalhe:
-        'Ligado, mas sem provedor de envio: falta RESEND_API_KEY + EMAIL_REMETENTE no ambiente (ou a configuração de SMTP do fallback). Enquanto isso, nenhum e-mail sai.',
+        'Ligado, mas este app não enxerga provedor de envio: falta RESEND_API_KEY + EMAIL_REMETENTE no ambiente (ou a configuração de SMTP do fallback).',
     };
   }
   if (!e.destinatario) {
@@ -85,7 +96,7 @@ export function diagnosticarEmail(e: EstadoEmail): Diagnostico {
   }
   return {
     situacao: 'ativo',
-    detalhe: `Alertas de movimentação e resumo de prazos saem por ${e.provedor === 'resend' ? 'Resend' : 'SMTP'}.`,
+    detalhe: `Este app enxerga o provedor ${e.provedor === 'resend' ? 'Resend' : 'SMTP'} e um destinatário — o canal está configurado do lado da aplicação.`,
   };
 }
 
