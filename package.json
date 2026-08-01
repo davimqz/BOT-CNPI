@@ -16,7 +16,8 @@
     "resumo:prazos": "tsx src/workers/prazos/resumo.ts",
     "alertas:enviar": "tsx src/workers/alertas/enviar.ts",
     "email:teste": "tsx src/workers/email/teste.ts",
-    "sanity:pepi": "tsx src/workers/pepi/sanity.ts"
+    "sanity:pepi": "tsx src/workers/pepi/sanity.ts",
+    "falha:pepi": "tsx src/workers/pepi/marcar-falha.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

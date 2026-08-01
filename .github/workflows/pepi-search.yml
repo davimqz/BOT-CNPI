@@ -56,3 +56,15 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           TERMO: ${{ inputs.termo }}
           TIPO_BUSCA: ${{ inputs.tipo_busca }}
+
+      # Rede de segurança do polling da tela. O `search:pepi` marca `erro`
+      # quando ELE falha, mas tudo que quebra ANTES dele — a sanidade (que não
+      # conhece o job), o `npm ci`, o download do navegador, o timeout do runner
+      # — deixava o job em `pendente` para sempre, e a tela em "consultando o
+      # INPI…" eternamente. Esperar sem motivo é pior que receber "falhou".
+      - name: Marcar o job como falho
+        if: failure() || cancelled()
+        run: npm run falha:pepi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JOB_ID: ${{ inputs.job_id }}
