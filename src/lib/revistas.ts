@@ -186,6 +186,58 @@ export function agruparPorAnoMes(revistas: RevistaCatalogo[]): AnoRevistas[] {
     });
 }
 
+export interface FiltroRevistas {
+  /** Trecho do número da edição: "2896" acha uma, "289" acha a década inteira. */
+  numero?: string;
+  /** Ano de publicação (4 dígitos). */
+  ano?: string;
+  /** Mês de publicação, 1-12. */
+  mes?: string;
+  /** Data exata de publicação, no formato `YYYY-MM-DD` do `<input type="date">`. */
+  data?: string;
+}
+
+/** `YYYY-MM-DD` da data de publicação, sempre em UTC (ver `agruparPorAnoMes`). */
+function isoUtc(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Filtra o catálogo. Os critérios se somam (E, não OU): número + mês devolve as
+ * edições que satisfazem os dois. Critério vazio ou ilegível é ignorado, nunca
+ * zera o resultado — filtro que esvazia a tela por causa de um espaço em branco
+ * parece sistema quebrado.
+ */
+export function filtrarRevistas(
+  revistas: RevistaCatalogo[],
+  filtro: FiltroRevistas,
+): RevistaCatalogo[] {
+  const numero = (filtro.numero ?? '').replace(/\D/g, '');
+  const ano = Number(filtro.ano);
+  const mes = Number(filtro.mes);
+  const data = (filtro.data ?? '').trim();
+
+  return revistas.filter((r) => {
+    if (numero && !String(r.numero).includes(numero)) return false;
+    if (Number.isInteger(ano) && ano > 0 && r.data.getUTCFullYear() !== ano) return false;
+    if (Number.isInteger(mes) && mes >= 1 && mes <= 12 && r.data.getUTCMonth() + 1 !== mes) {
+      return false;
+    }
+    if (data && isoUtc(r.data) !== data) return false;
+    return true;
+  });
+}
+
+/** Anos presentes no catálogo, do mais recente ao mais antigo — opções do filtro. */
+export function anosDoCatalogo(revistas: RevistaCatalogo[]): number[] {
+  return [...new Set(revistas.map((r) => r.data.getUTCFullYear()))].sort((a, b) => b - a);
+}
+
+/** Rótulo do mês 1-12 ("janeiro"…). Fora do intervalo devolve string vazia. */
+export function rotuloMes(mes: number): string {
+  return MESES[mes - 1] ?? '';
+}
+
 /**
  * Edições que faltam ingerir no intervalo — o que o `--backfill` percorre.
  * Devolve em ordem crescente: processar do mais antigo para o mais novo mantém o

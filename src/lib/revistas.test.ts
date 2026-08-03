@@ -4,9 +4,12 @@ import {
   PRIMEIRA_EDICAO_2026,
   PRIMEIRA_EDICAO_MONITORADA,
   agruparPorAnoMes,
+  anosDoCatalogo,
   dataEstimada,
   edicoesFaltantes,
+  filtrarRevistas,
   montarCatalogo,
+  rotuloMes,
   urlPdfMarcas,
   urlXmlZip,
   type EdicaoIngerida,
@@ -140,6 +143,68 @@ test('anos diferentes viram blocos separados', () => {
     montarCatalogo([ingerida(2869, '2025-12-30'), ingerida(2870, '2026-01-06')], { desde: 2869 }),
   );
   assert.deepEqual(anos.map((a) => a.ano), [2026, 2025]);
+});
+
+// --- Filtro da tela /revistas ---
+
+const catalogo2026 = montarCatalogo(
+  [ingerida(2899, '2026-07-28')],
+  { desde: PRIMEIRA_EDICAO_2026 },
+);
+const numeros = (rs: ReturnType<typeof filtrarRevistas>) => rs.map((r) => r.numero);
+
+test('filtro vazio devolve o catálogo inteiro', () => {
+  assert.equal(filtrarRevistas(catalogo2026, {}).length, 30);
+  assert.equal(filtrarRevistas(catalogo2026, { numero: '', ano: '', mes: '', data: '' }).length, 30);
+});
+
+test('filtro por número: exato e por trecho', () => {
+  assert.deepEqual(numeros(filtrarRevistas(catalogo2026, { numero: '2896' })), [2896]);
+  // Trecho: "289" pega a década toda, que é o atalho de faixa sem campo de faixa.
+  assert.deepEqual(
+    numeros(filtrarRevistas(catalogo2026, { numero: '289' })),
+    [2899, 2898, 2897, 2896, 2895, 2894, 2893, 2892, 2891, 2890],
+  );
+  // Pontuação digitada por engano não pode zerar o resultado.
+  assert.deepEqual(numeros(filtrarRevistas(catalogo2026, { numero: ' 2896 ' })), [2896]);
+});
+
+test('filtro por mês e por ano', () => {
+  assert.deepEqual(numeros(filtrarRevistas(catalogo2026, { mes: '1' })), [2873, 2872, 2871, 2870]);
+  assert.equal(filtrarRevistas(catalogo2026, { ano: '2026' }).length, 30);
+  assert.equal(filtrarRevistas(catalogo2026, { ano: '2025' }).length, 0);
+});
+
+test('filtro por data exata usa UTC, não o fuso local', () => {
+  assert.deepEqual(numeros(filtrarRevistas(catalogo2026, { data: '2026-07-28' })), [2899]);
+  assert.deepEqual(numeros(filtrarRevistas(catalogo2026, { data: '2026-01-06' })), [2870]);
+  assert.equal(filtrarRevistas(catalogo2026, { data: '2026-07-29' }).length, 0);
+});
+
+test('critérios se somam (E), não se acumulam (OU)', () => {
+  assert.deepEqual(numeros(filtrarRevistas(catalogo2026, { numero: '289', mes: '7' })), [
+    2899, 2898, 2897, 2896,
+  ]);
+  // Combinação impossível devolve vazio — e isso é resposta, não erro.
+  assert.equal(filtrarRevistas(catalogo2026, { numero: '2870', mes: '7' }).length, 0);
+});
+
+test('valor ilegível é ignorado em vez de esvaziar a tela', () => {
+  assert.equal(filtrarRevistas(catalogo2026, { mes: 'abc' }).length, 30);
+  assert.equal(filtrarRevistas(catalogo2026, { mes: '13' }).length, 30);
+  assert.equal(filtrarRevistas(catalogo2026, { ano: 'xx' }).length, 30);
+  assert.equal(filtrarRevistas(catalogo2026, { numero: '---' }).length, 30);
+});
+
+test('anos e rótulos de mês para as opções do filtro', () => {
+  assert.deepEqual(anosDoCatalogo(catalogo2026), [2026]);
+  assert.deepEqual(
+    anosDoCatalogo(montarCatalogo([ingerida(2870, '2026-01-06')], { desde: 2869 })),
+    [2026, 2025],
+  );
+  assert.equal(rotuloMes(1), 'janeiro');
+  assert.equal(rotuloMes(12), 'dezembro');
+  assert.equal(rotuloMes(13), '');
 });
 
 test('faltantes: só os buracos do intervalo, do mais antigo para o mais novo', () => {

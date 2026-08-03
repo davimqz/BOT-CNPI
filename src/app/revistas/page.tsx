@@ -3,7 +3,10 @@ import { prisma } from '@/lib/db';
 import {
   PRIMEIRA_EDICAO_2026,
   agruparPorAnoMes,
+  anosDoCatalogo,
+  filtrarRevistas,
   montarCatalogo,
+  rotuloMes,
   type RevistaCatalogo,
 } from '@/lib/revistas';
 
@@ -45,7 +48,20 @@ function Caixa({ revista }: { revista: RevistaCatalogo }) {
   );
 }
 
-export default async function RevistasPage() {
+interface Params {
+  numero?: string;
+  ano?: string;
+  mes?: string;
+  data?: string;
+}
+
+export default async function RevistasPage({
+  searchParams,
+}: {
+  searchParams: Promise<Params>;
+}) {
+  const params = await searchParams;
+
   // A edição só entra aqui para dar a data oficial de publicação; o conteúdo dela
   // não é assunto desta tela, então nada de contar despachos.
   const edicoes = await prisma.edicaoRpi.findMany({
@@ -54,7 +70,10 @@ export default async function RevistasPage() {
   });
 
   const catalogo = montarCatalogo(edicoes);
-  const anos = agruparPorAnoMes(catalogo);
+  const filtradas = filtrarRevistas(catalogo, params);
+  const anos = agruparPorAnoMes(filtradas);
+  const anosDisponiveis = anosDoCatalogo(catalogo);
+  const temFiltro = Boolean(params.numero || params.ano || params.mes || params.data);
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 p-6">
@@ -71,11 +90,90 @@ export default async function RevistasPage() {
         o arquivo é sempre o oficial, não uma cópia nossa.
       </p>
 
+      <form method="get" className="mb-6 flex flex-wrap items-end gap-3 text-sm">
+        <label className="block">
+          <span className="mb-1 block opacity-70">Número</span>
+          <input
+            name="numero"
+            inputMode="numeric"
+            defaultValue={params.numero ?? ''}
+            placeholder="ex: 2896"
+            className="w-28 rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block opacity-70">Mês</span>
+          <select
+            name="mes"
+            defaultValue={params.mes ?? ''}
+            className="rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20 dark:bg-black"
+          >
+            <option value="">Todos</option>
+            {Array.from({ length: 12 }, (_, i) => (
+              <option key={i + 1} value={i + 1} className="capitalize">
+                {rotuloMes(i + 1)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block opacity-70">Ano</span>
+          <select
+            name="ano"
+            defaultValue={params.ano ?? ''}
+            className="rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20 dark:bg-black"
+          >
+            <option value="">Todos</option>
+            {anosDisponiveis.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block opacity-70">Data de publicação</span>
+          <input
+            type="date"
+            name="data"
+            defaultValue={params.data ?? ''}
+            className="rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
+          />
+        </label>
+        <button
+          type="submit"
+          className="rounded bg-foreground px-4 py-1.5 font-medium text-background"
+        >
+          Filtrar
+        </button>
+        {temFiltro && (
+          <Link href="/revistas" className="py-1.5 underline opacity-70 hover:opacity-100">
+            limpar
+          </Link>
+        )}
+      </form>
+
       {catalogo.length === 0 && (
         <p className="rounded border border-black/10 px-4 py-8 text-center text-sm opacity-70 dark:border-white/15">
           Nenhuma edição processada ainda. Rode <code>npm run ingest:rpi -- --backfill</code> (ou o
           workflow <em>Backfill RPI</em> no GitHub Actions) para puxar o histórico desde janeiro de
           2026.
+        </p>
+      )}
+
+      {catalogo.length > 0 && filtradas.length === 0 && (
+        <p className="rounded border border-black/10 px-4 py-8 text-center text-sm opacity-70 dark:border-white/15">
+          Nenhuma revista com esses filtros.{' '}
+          <Link href="/revistas" className="underline">
+            Limpar
+          </Link>
+          .
+        </p>
+      )}
+
+      {temFiltro && filtradas.length > 0 && (
+        <p className="mb-4 text-sm opacity-70">
+          {filtradas.length} de {catalogo.length} revista(s).
         </p>
       )}
 
