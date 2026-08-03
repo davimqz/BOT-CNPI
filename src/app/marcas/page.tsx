@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { EVENTOS_ALERTA, eventoPorSlug } from '@/lib/eventos-alerta';
 import { THRESHOLD_PADRAO, THRESHOLDS } from '@/lib/similaridade';
@@ -206,12 +205,9 @@ export default function MarcasPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 p-6">
-      <header className="mb-6 flex items-center justify-between">
+    <div className="mx-auto w-full max-w-6xl flex-1 p-6">
+      <header className="mb-6">
         <h1 className="text-2xl font-semibold">Marcas monitoradas</h1>
-        <Link href="/" className="text-sm underline opacity-70 hover:opacity-100">
-          ← voltar
-        </Link>
       </header>
 
       <form
@@ -598,6 +594,6 @@ export default function MarcasPage() {
           </tbody>
         </table>
       </div>
-    </main>
+    </div>
   );
 }

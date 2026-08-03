@@ -80,12 +80,9 @@ export default async function HistoricoPage({
   };
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 p-6">
-      <header className="mb-6 flex items-center justify-between">
+    <div className="mx-auto w-full max-w-6xl flex-1 p-6">
+      <header className="mb-6">
         <h1 className="text-2xl font-semibold">Histórico RPI</h1>
-        <Link href="/" className="text-sm underline opacity-70 hover:opacity-100">
-          ← voltar
-        </Link>
       </header>
 
       <form method="get" className="mb-6 flex flex-wrap items-end gap-3 text-sm">
@@ -208,6 +205,6 @@ export default async function HistoricoPage({
           </Link>
         )}
       </nav>
-    </main>
+    </div>
   );
 }

@@ -3,6 +3,12 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import "./globals.css";
 import { AvisoNovidades } from "./aviso-novidades";
+import { AppSidebar } from "@/components/app-sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { getUsuarioUnico } from "@/lib/usuario";
 import { carregarNovidades, paraUI, type NovidadesUI } from "@/lib/novidades";
@@ -32,8 +38,6 @@ export const metadata: Metadata = {
  */
 async function novidadesDaSessao(): Promise<NovidadesUI | null> {
   try {
-    const token = (await cookies()).get(SESSION_COOKIE)?.value;
-    if (!(await verifySessionToken(token))) return null;
     const usuario = await getUsuarioUnico();
     return paraUI(await carregarNovidades(usuario.id));
   } catch {
@@ -41,12 +45,23 @@ async function novidadesDaSessao(): Promise<NovidadesUI | null> {
   }
 }
 
+/**
+ * A sidebar aparece para quem está autenticado, e só. A verificação é a mesma
+ * que já governava o aviso de novidades — na tela de login não pode haver menu
+ * de navegação do sistema, nem o nome das funcionalidades.
+ */
+async function temSessao(): Promise<boolean> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  return verifySessionToken(token);
+}
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const novidades = await novidadesDaSessao();
+  const autenticado = await temSessao();
+  const novidades = autenticado ? await novidadesDaSessao() : null;
 
   return (
     <html
@@ -54,7 +69,22 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
+        {autenticado ? (
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset>
+              {/* O gatilho fica no topo do conteúdo, não dentro da sidebar:
+                  recolhida no celular ela não existe na tela, e o botão de
+                  abri-la iria junto. */}
+              <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+                <SidebarTrigger className="-ml-1" />
+              </header>
+              {children}
+            </SidebarInset>
+          </SidebarProvider>
+        ) : (
+          children
+        )}
         {/* Em toda tela: a movimentação chega quando chega, não quando o
             usuário está justamente na página de prazos. */}
         <AvisoNovidades inicial={novidades} />
