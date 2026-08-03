@@ -1,0 +1,72 @@
+# Backfill do histórico da RPI desde janeiro de 2026 (RPI 2870).
+#
+# NUNCA agendado, só `workflow_dispatch`: é uma operação de carga pesada (dezenas
+# de edições, ~15 MB de banco cada) que se roda uma vez e depois só para tapar
+# buraco. Um `schedule` aqui competiria com a ingestão semanal pelo mesmo banco.
+#
+# O job é resumível — cada edição é uma transação própria. Se estourar o timeout,
+# basta disparar de novo que ele continua de onde parou.
+name: Backfill RPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: 'Primeira edição a puxar (padrão 2870 = 06/01/2026)'
+        required: false
+        default: '2870'
+      max:
+        description: 'Teto de edições nesta rodada (vazio = todas as que faltarem)'
+        required: false
+        default: ''
+      enxuto:
+        description: 'Modo enxuto: cruza a revista inteira, grava só os despachos das suas marcas (cabe no plano gratuito)'
+        type: boolean
+        required: false
+        default: true
+      forcar:
+        description: 'Reprocessar também as edições que já estão no banco'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    # Longo de propósito: ~2-3 min por edição entre download, parse e gravação no
+    # Neon. 30 edições não cabem nos 30 min da ingestão semanal.
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Backfill das edições faltantes
+        run: |
+          npm run ingest:rpi -- --backfill=${{ inputs.desde }} \
+            ${{ inputs.max && format('--max={0}', inputs.max) || '' }} \
+            ${{ inputs.enxuto && '--enxuto' || '--completo' }} \
+            ${{ inputs.forcar && '--forcar' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # Mesmo motivo do rpi-ingestion.yml: o alerta sai junto da detecção. Aqui
+      # ele importa mais — o backfill pode revelar movimentação de meses atrás.
+      - name: Enviar alertas do que o backfill detectou
+        run: npm run alertas:enviar
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_REMETENTE: ${{ secrets.EMAIL_REMETENTE }}
+          EMAIL_RESPONDER_PARA: ${{ secrets.EMAIL_RESPONDER_PARA }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_CRIPTOGRAFIA: ${{ secrets.SMTP_CRIPTOGRAFIA }}

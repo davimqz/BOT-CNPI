@@ -51,7 +51,91 @@ Como a publicação é semanal e sequencial, duas estratégias funcionam e se co
 - **Estimativa por incremento**: guarde a última edição processada com sucesso e assuma `última + 1` na próxima terça. Rápido, não depende de scraping.
 - **Confirmação por tentativa de download**: tente baixar o ZIP da edição estimada; um 404 significa que ainda não foi publicada (tente de novo mais tarde no mesmo dia) — não trate isso como erro fatal, é um estado esperado antes da publicação.
 
-Evite depender de scraping do índice HTML (`revistas.inpi.gov.br/rpi/`) como única fonte de verdade do número da edição — é mais frágil que simplesmente tentar o download direto pela URL previsível.
+Evite depender de scraping do índice HTML (`revistas.inpi.gov.br/rpi/`) como única fonte de verdade do número da edição — é mais frágil que simplesmente tentar o download direto pela URL previsível. (Confirmado em 02/08/2026: aquele índice é montado por JavaScript, então o HTML cru não traz link de edição nenhum — scraping dele exigiria navegador, para obter o que a URL previsível já dá de graça.)
+
+### Mapa edição ↔ data, e o começo de 2026 (confirmado em 02/08/2026)
+
+A cadência é **exatamente semanal**: `data(N) = 06/01/2026 + (N − 2870) × 7 dias`. Verificado por
+`HEAD` no `last-modified` do servidor do INPI em 10 pontos ao longo de 10 meses (2860 → 28/10/2025,
+2869 → 30/12/2025, 2870 → 06/01/2026, 2871 → 13/01, 2875 → 10/02, 2880 → 17/03, 2890 → 26/05,
+2896 → 07/07, 2897 → 14/07, 2899 → 28/07) — nenhum salto.
+
+> **A RPI 2870, de 06/01/2026, é a primeira edição de 2026** (a 2869 é de 30/12/2025). É a
+> constante `PRIMEIRA_EDICAO_2026` em `src/lib/revistas.ts`, e é onde o sistema começa a puxar
+> quando o banco está vazio.
+
+Trate a fórmula como **estimativa exibível, nunca como fonte de verdade**: a data que vale é a que
+vem no XML da edição. A tela `/revistas` marca "(estimada)" enquanto a edição não foi ingerida,
+justamente para não apresentar palpite como fato caso o INPI desloque uma publicação por feriado.
+
+Além do ZIP do XML, existe o **PDF oficial da Seção de Marcas** em
+`https://revistas.inpi.gov.br/pdf/Marcas[N].pdf` (`MARCAS` maiúsculo também responde; `RM[N].pdf`
+não). É útil como link de download para o usuário, não para ingestão: **~130 MB por edição**,
+contra 6-10 MB do ZIP.
+
+### Backfill histórico e o teto de armazenamento (medido em 02/08/2026)
+
+A ingestão normal só anda para a frente (`última + 1`), então o histórico anterior à primeira
+rodada precisa de um modo próprio: `npm run ingest:rpi -- --backfill[=EDICAO] [--max=N]` (workflow
+`rpi-backfill.yml`, só `workflow_dispatch`). Ele pula o que já está no banco, para na primeira
+edição não publicada, e é resumível — cada edição é uma transação própria.
+
+**O número que decide a arquitetura aqui**: uma edição custa **~19 MB no Postgres** (~35-40 mil
+despachos). Medido, não estimado — `texto_complementar` sozinho é 37% do heap. Logo:
+
+| | Edições | Espaço |
+|---|---|---|
+| 2026 inteiro (2870-2899) | 30 | **~570 MB** |
+| Neon free | — | 512 MB |
+| Janela de 12 edições (~3 meses) | 12 | ~230 MB |
+
+Ou seja: **guardar 2026 inteiro não cabe no plano free**, e banco cheio significa escrita
+bloqueada — ingestão semanal parada, que é o oposto do que o sistema existe para fazer. Não tente
+resolver com normalização: mesmo eliminando `texto_despacho` inteiro (que é redundante com o
+código) a economia é ~13%, não muda a ordem de grandeza.
+
+### Modo enxuto: cruzar a revista inteira, guardar só o que é do usuário
+
+A saída que torna 2026 inteiro gratuito. Volume e valor estão em lugares opostos: os ~35 mil
+despachos de uma edição são lidos **uma vez**, no cruzamento, e depois praticamente nenhum é lido de
+novo — são processos de terceiros. O `--enxuto` (ou `RPI_MODO_ENXUTO=1`) baixa e parseia a revista
+completa, **cruza completa** e só então grava o que casou.
+
+A ordem importa e é onde se erra: **cruzar primeiro, filtrar depois**. Filtrar antes de cruzar
+quebraria o motor de similaridade, que precisa comparar o nome da marca monitorada contra *todos*
+os nomes da edição — colidência é justamente com processo de terceiro. Em `ingest.ts` isso aparece
+como ids gerados no cliente (`randomUUID`) antes do cruzamento, usados depois como PK das linhas
+inseridas: é a chave que liga o cruzamento em memória à linha gravada, sem depender da ordem de
+retorno de um `createMany`.
+
+Medido em 03/08/2026 sobre a RPI 2870 (25.392 despachos), com marcas semeadas e o banco restaurado
+depois:
+
+| | Completo | Enxuto |
+|---|---|---|
+| Linhas gravadas | 25.392 | 2 (as que casaram) |
+| Tempo | 29 s | **8,7 s** |
+| Despachos casados / alertas / prazos | 2 / 2 / 2 | **2 / 2 / 2 (idênticos)** |
+| Colidência KAEF·CAEF a 94,4% | acha | **acha** |
+
+O que se perde é só navegar despacho de terceiro daquela edição no Histórico RPI — e ele continua
+no PDF oficial, linkado em `/revistas`.
+
+**Cuidado ao recruzar**: `--recruzar` lê do banco, então numa edição enxuta ele encontraria "nada" e
+uma marca nova concluiria que não houve movimentação — resposta errada disfarçada de resposta. Por
+isso `edicoes_rpi.enxuta` existe e o `--recruzar` avisa alto, mandando usar
+`--backfill=N --forcar`, que rebaixa a revista do INPI e cruza de novo.
+
+### Janela móvel
+
+Complementar ao enxuto, para quem quer Histórico RPI navegável nas edições recentes:
+`npm run ingest:rpi -- --limpar[=N] [--dry-run]`. Duas coisas ele **nunca** apaga, e é isso que
+torna a janela aceitável:
+
+- `edicoes_rpi` inteiro — o catálogo continua completo em `/revistas`, com download apontando para
+  o INPI. Nenhuma revista some da tela, e `--backfill` traz qualquer uma de volta.
+- **Todo despacho vinculado a marca monitorada**, de qualquer idade. É o histórico que é do
+  usuário, e é dele que penduram os `prazos` (que cairiam junto, por `ON DELETE CASCADE`).
 
 ## Fluxo de ingestão recomendado
 

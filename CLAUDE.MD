@@ -45,6 +45,61 @@ Todo o stack acima cabe em tiers gratuitos para uso pessoal (um usuário, uma ma
 - **Monitoramento diário das marcas de fonte `scraping`**: workflow agendado (`.github/workflows/pepi-monitor.yml`), roda `npm run monitor:pepi` uma vez ao dia. As marcas de fonte `rpi` não passam por aqui — elas são cruzadas dentro do próprio `rpi-ingestion.yml`. Frequência fina ("a cada 15 minutos") não é possível nesta variante: `schedule` do GitHub é best-effort e cada marca abre um navegador contra o pePI.
 - Os três workflows (`rpi-ingestion.yml`, `pepi-search.yml`, `pepi-monitor.yml`) vivem em `.github/workflows/` — ver `TASKS.md` para o estado de cada fase.
 
+### 3.1.1 O teto de armazenamento é a restrição que molda o histórico (medido em 02/08/2026)
+
+O limite que aperta primeiro na variante gratuita **não é minuto de CPU nem invocação de função —
+é disco**. Uma edição da RPI custa **~19 MB no Postgres** (~35-40 mil despachos; `texto_complementar`
+sozinho é 37% do heap). O Neon free tem 0,5 GB. Logo:
+
+- **2026 inteiro (RPI 2870-2899, 30 edições) = ~570 MB** — não cabe.
+- A cada terça, +19 MB. Qualquer configuração que só acumule estoura, é questão de quando.
+- Banco cheio = escrita bloqueada = ingestão semanal parada. **O modo de falha do disco cheio
+  atinge exatamente a função central do sistema**, e por isso ele não pode ser deixado para
+  "quando acontecer".
+
+Não tente resolver com normalização do schema: eliminar `texto_despacho` (redundante com o código
+do despacho) economiza ~13%, não muda a ordem de grandeza.
+
+#### A saída gratuita: modo enxuto (cruzar tudo, guardar só o que é seu)
+
+A observação que destrava o problema é que **o volume e o valor estão em lugares opostos**. Os ~35
+mil despachos de uma edição são consumidos uma vez, no cruzamento, e depois 99,99% deles nunca mais
+são lidos — são processos de terceiros. O que o sistema realmente precisa guardar é o punhado que
+casou com uma marca monitorada.
+
+O **modo enxuto** (`--enxuto`, ou `RPI_MODO_ENXUTO=1` no ambiente) baixa e parseia a revista
+inteira, **cruza por completo** — inclusive o motor de similaridade, que precisa ver todos os nomes
+da edição para achar colidência — e só então grava. Ficam no banco apenas os despachos que casaram.
+
+- **Fidelidade idêntica** no que importa: alerta, prazo e colidência saem iguais ao modo completo.
+  Verificado lado a lado em 03/08/2026 na RPI 2870 com marca semeada (mesmos 2 despachos, mesmos
+  alertas, mesmas datas de prazo; e uma colidência KAEF/CAEF a 94,4% achada entre 25.392 despachos
+  gravando 8 linhas).
+- **Custo por edição: praticamente zero** — 2 linhas em vez de 25.392. E **mais rápido**: 8,7s
+  contra 29s, porque gravar as 35 mil linhas era a maior parte do tempo.
+- **O que se abre mão**: navegar despacho de *terceiro* daquela edição no Histórico RPI. O
+  conteúdo continua disponível no PDF oficial, linkado em `/revistas`.
+
+Com isso, **2026 inteiro cabe de graça**. A configuração recomendada no plano gratuito é mista:
+edições recentes completas (Histórico RPI navegável) e as antigas enxutas.
+
+#### As três alavancas, e quando usar cada uma
+
+| | Comando | Efeito |
+|---|---|---|
+| Consumir tudo de graça | `--backfill --enxuto` | Cruza toda revista, guarda só o que é seu |
+| Manter janela navegável | `--limpar[=N]` | Descarta o "resto da revista" fora das N últimas edições |
+| Histórico completo | Neon Launch (pay-as-you-go) | ~US$0,35/GB-mês; 2026 inteiro ≈ US$0,20/mês de storage |
+
+Duas invariantes que **qualquer** uma delas preserva, e que devem sobreviver a mexidas futuras:
+`edicoes_rpi` nunca é apagada (o catálogo inteiro continua em `/revistas`, com download direto do
+INPI) e despacho vinculado a marca monitorada nunca é descartado (é o histórico do usuário, e dele
+penduram os `prazos`, que cairiam junto por `ON DELETE CASCADE`).
+
+Correção de um número que circulou aqui antes: o plano Launch do Neon **não é mais US$19 fixos** —
+virou pay-as-you-go sem mínimo mensal (US$0,35/GB-mês de storage, US$0,106/CU-hora de compute, com
+auto-suspensão). Reconferir antes de decidir, como todo tier citado neste documento.
+
 ### 3.2 E-mail: por que Resend e não "cada usuário com seu SMTP" (revisto em 28/07/2026)
 
 A escolha original era Nodemailer com SMTP configurado pelo usuário, herdada do software de
@@ -126,7 +181,7 @@ registrar qualquer número aqui.
 | `marcas_monitoradas` | Nome, processo, classe NCL, tipo de busca, similaridade on/off + threshold, fonte de dados (`rpi` ou `scraping`), cliente vinculado, eventos que disparam alerta. Só na fonte `scraping`: `ultimo_snapshot_pepi` (retrato "processo → situação" da última consulta) e `verificado_em` — é a diferença entre retratos que caracteriza movimentação nova nessa fonte. |
 | `despachos` | Movimentação capturada: marca relacionada, edição da RPI, data de publicação, código e texto do despacho. `alerta_pendente` é a fila de notificação preenchida pelo job de verificação (Fase 3) e consumida pelo envio (Fase 6). Despacho vindo do pePI tem `edicao_rpi_id` nulo e o código sintético `PEPI-SITUACAO` (que não existe na tabela do INPI, e por isso nunca alimenta o cálculo de prazos da Fase 5). |
 | `prazos` | Derivado de um despacho: tipo de prazo (slug de `src/lib/prazos.ts`), data-limite, status. Único por `(despacho, tipo)` — re-rodar a ingestão recalcula em vez de duplicar. Só `cumprido` é gravado pelo usuário; `pendente`/`vencido` saem da data na leitura, sem job diário. Regras validadas contra a LPI e o Manual de Marcas — ver `references/despacho-codes.md` na skill `rpi-ingestion-despachos`. |
-| `edicoes_rpi` | Cache local de cada edição já processada — número, data de publicação, timestamp de processamento. |
+| `edicoes_rpi` | Cache local de cada edição já processada — número, data de publicação, timestamp de processamento. É também o catálogo da seção **Revistas INPI** (`/revistas`), e por isso **nunca** é apagado pela limpeza da janela móvel (Seção 3.1.1): o histórico de revistas desde jan/2026 continua completo e baixável mesmo quando os despachos antigos saem do banco. |
 | `templates` | Configuração de marca própria por usuário: cores, logo, textos de relatório e e-mail, assinatura. |
 | `configuracoes_alerta` | Canais habilitados por usuário e parâmetros de delay/intervalo de envio. |
 | `logs_execucao` | Registro de cada rodada de busca/monitoramento, para auditoria e depuração. |

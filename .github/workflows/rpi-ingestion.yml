@@ -34,6 +34,22 @@ jobs:
         run: npm run ingest:rpi --if-present
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Variable (não secret) `RPI_MODO_ENXUTO = 1` faz a ingestão semanal
+          # gravar só os despachos das suas marcas — a revista continua sendo
+          # baixada e cruzada por inteiro. É o que mantém o banco estável no
+          # plano gratuito. Vazia = modo completo (padrão). Ver CLAUDE.md 3.1.1.
+          RPI_MODO_ENXUTO: ${{ vars.RPI_MODO_ENXUTO }}
+
+      # Janela móvel do Histórico RPI, só quando explicitamente configurada:
+      # defina a variable `RPI_JANELA_EDICOES` (ex: 12) para manter as N edições
+      # mais recentes completas e descartar o "resto da revista" das antigas.
+      # Sem a variable, nada é apagado — apagar dado nunca pode ser efeito
+      # colateral de atualizar o código.
+      - name: Manter a janela do Histórico RPI
+        if: vars.RPI_JANELA_EDICOES != ''
+        run: npm run ingest:rpi -- --limpar=${{ vars.RPI_JANELA_EDICOES }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       # Aqui, e não num workflow à parte: o alerta precisa sair junto da detecção.
       # O que falhar continua na fila e é reprocessado pelo alertas.yml diário.

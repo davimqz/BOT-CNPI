@@ -1,8 +1,10 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/db';
 import type { Cruzamento, DespachoParaCruzamento } from '@/lib/verificacao';
 import { cruzarDespachos, motivoDoVinculo } from '@/lib/verificacao';
 import { prazosDoDespacho, statusPorData } from '@/lib/prazos';
+import { PRIMEIRA_EDICAO_2026, edicoesFaltantes } from '@/lib/revistas';
 import { baixarEdicao } from './download';
 import { parseRevista } from './parse';
 
@@ -16,17 +18,36 @@ import { parseRevista } from './parse';
 const LOTE_INSERT = 1000;
 const LOTE_UPDATE = 1000;
 
+/**
+ * Modo enxuto ligado por variável de ambiente (`RPI_MODO_ENXUTO=1`), para valer
+ * também na ingestão semanal do GitHub Actions sem mexer no comando. A flag
+ * `--enxuto` / `--completo` sobrepõe por rodada.
+ *
+ * Padrão desligado: quem já tem histórico completo não deve passar a gravar menos
+ * por causa de uma atualização de código. Ligar é decisão explícita de capacidade
+ * (ver CLAUDE.md Seção 3.1.1).
+ */
+const MODO_ENXUTO_PADRAO = process.env.RPI_MODO_ENXUTO === '1';
+
 async function determinarProximaEdicao(): Promise<number> {
   const ultima = await prisma.edicaoRpi.aggregate({ _max: { numero: true } });
   if (ultima._max.numero) return ultima._max.numero + 1;
 
+  // Banco vazio: o sistema começa em janeiro de 2026 (RPI 2870), não na edição
+  // da semana. Semente explícita (argumento ou RPI_EDICAO_INICIAL) ainda vence,
+  // para o caso de só se querer a edição corrente.
   const argumentoSemente = process.argv.slice(2).find((a) => !a.startsWith('--'));
-  const semente = Number(process.env.RPI_EDICAO_INICIAL ?? argumentoSemente);
-  if (!Number.isInteger(semente) || semente <= 0) {
-    throw new Error(
-      'Banco sem edições e nenhuma semente informada. Use: npm run ingest:rpi -- <numero> ' +
-        'ou defina RPI_EDICAO_INICIAL.',
+  const informada = process.env.RPI_EDICAO_INICIAL ?? argumentoSemente;
+  if (informada === undefined) {
+    console.log(
+      `[rpi] banco sem edições — começando pela RPI ${PRIMEIRA_EDICAO_2026} (primeira de 2026).`,
     );
+    return PRIMEIRA_EDICAO_2026;
+  }
+
+  const semente = Number(informada);
+  if (!Number.isInteger(semente) || semente <= 0) {
+    throw new Error(`Semente de edição inválida: ${JSON.stringify(informada)}`);
   }
   return semente;
 }
@@ -88,20 +109,18 @@ async function gerarPrazos(
   return gravados;
 }
 
-/**
- * Job de verificação da fonte `rpi`: liga cada despacho da edição à marca
- * monitorada correspondente e marca `alertaPendente` nos que caem entre os
- * eventos escolhidos pela marca.
- *
- * Só olha despacho AINDA SEM MARCA: na ingestão normal isso é o total da edição,
- * e no modo retroativo (--recruzar, para marca cadastrada depois da ingestão)
- * garante que um alerta já enviado pela Fase 6 não volte para a fila.
- */
-async function cruzarComMonitoradas(
-  edicaoId: string,
-  dataPublicacao: Date,
-): Promise<ResumoCruzamento> {
-  const marcas = await prisma.marcaMonitorada.findMany({
+type MarcaRpi = Awaited<ReturnType<typeof carregarMarcasRpi>>[number];
+
+const RESUMO_VAZIO: ResumoCruzamento = {
+  marcasMonitoradas: 0,
+  despachosCasados: 0,
+  alertas: 0,
+  colidencias: 0,
+  prazos: 0,
+};
+
+async function carregarMarcasRpi() {
+  return prisma.marcaMonitorada.findMany({
     where: { ativa: true, fonteDados: 'rpi' },
     // Ordem estável: em caso de empate, a marca cadastrada primeiro fica com o despacho.
     orderBy: { criadoEm: 'asc' },
@@ -115,36 +134,18 @@ async function cruzarComMonitoradas(
       similaridadeThreshold: true,
     },
   });
-  if (marcas.length === 0) {
-    console.log('[rpi] nenhuma marca monitorada de fonte rpi — nada a cruzar.');
-    return { marcasMonitoradas: 0, despachosCasados: 0, alertas: 0, colidencias: 0, prazos: 0 };
-  }
+}
 
-  const despachos = await prisma.despacho.findMany({
-    where: { edicaoRpiId: edicaoId, marcaId: null },
-    select: { id: true, processo: true, nomeMarca: true, classeNcl: true, codigo: true },
-  });
-  const cruzamentos = cruzarDespachos(marcas, despachos);
-
-  // Um UPDATE por combinação (marca, gera alerta ou não), em lotes — evita um
-  // round-trip por despacho quando uma marca movimenta muito numa edição só.
-  const grupos = new Map<string, string[]>();
-  for (const c of cruzamentos) {
-    const chave = `${c.marcaId}|${c.alerta}`;
-    const lista = grupos.get(chave);
-    if (lista) lista.push(c.despachoId);
-    else grupos.set(chave, [c.despachoId]);
-  }
-  for (const [chave, ids] of grupos) {
-    const [marcaId, alerta] = chave.split('|');
-    for (let i = 0; i < ids.length; i += LOTE_UPDATE) {
-      await prisma.despacho.updateMany({
-        where: { id: { in: ids.slice(i, i + LOTE_UPDATE) } },
-        data: { marcaId, alertaPendente: alerta === 'true' },
-      });
-    }
-  }
-
+/**
+ * Log + prazos, comum aos dois modos de gravação (completo e enxuto). Recebe os
+ * cruzamentos já persistidos; não escreve em `despachos`.
+ */
+async function finalizarCruzamento(
+  cruzamentos: Cruzamento[],
+  despachos: DespachoParaCruzamento[],
+  marcas: MarcaRpi[],
+  dataPublicacao: Date,
+): Promise<ResumoCruzamento> {
   const alertas = cruzamentos.filter((c) => c.alerta).length;
   const porSimilaridade = cruzamentos.filter((c) => c.motivo === 'similaridade');
   const marcasComMovimentacao = new Set(cruzamentos.map((c) => c.marcaId)).size;
@@ -174,8 +175,144 @@ async function cruzarComMonitoradas(
   };
 }
 
+/**
+ * Job de verificação da fonte `rpi`: liga cada despacho da edição à marca
+ * monitorada correspondente e marca `alertaPendente` nos que caem entre os
+ * eventos escolhidos pela marca.
+ *
+ * Só olha despacho AINDA SEM MARCA: na ingestão normal isso é o total da edição,
+ * e no modo retroativo (--recruzar, para marca cadastrada depois da ingestão)
+ * garante que um alerta já enviado pela Fase 6 não volte para a fila.
+ */
+async function cruzarComMonitoradas(
+  edicaoId: string,
+  dataPublicacao: Date,
+): Promise<ResumoCruzamento> {
+  const marcas = await carregarMarcasRpi();
+  if (marcas.length === 0) {
+    console.log('[rpi] nenhuma marca monitorada de fonte rpi — nada a cruzar.');
+    return { ...RESUMO_VAZIO };
+  }
+
+  const despachos = await prisma.despacho.findMany({
+    where: { edicaoRpiId: edicaoId, marcaId: null },
+    select: { id: true, processo: true, nomeMarca: true, classeNcl: true, codigo: true },
+  });
+  const cruzamentos = cruzarDespachos(marcas, despachos);
+
+  // Um UPDATE por combinação (marca, gera alerta ou não), em lotes — evita um
+  // round-trip por despacho quando uma marca movimenta muito numa edição só.
+  const grupos = new Map<string, string[]>();
+  for (const c of cruzamentos) {
+    const chave = `${c.marcaId}|${c.alerta}`;
+    const lista = grupos.get(chave);
+    if (lista) lista.push(c.despachoId);
+    else grupos.set(chave, [c.despachoId]);
+  }
+  for (const [chave, ids] of grupos) {
+    const [marcaId, alerta] = chave.split('|');
+    for (let i = 0; i < ids.length; i += LOTE_UPDATE) {
+      await prisma.despacho.updateMany({
+        where: { id: { in: ids.slice(i, i + LOTE_UPDATE) } },
+        data: { marcaId, alertaPendente: alerta === 'true' },
+      });
+    }
+  }
+
+  return finalizarCruzamento(cruzamentos, despachos, marcas, dataPublicacao);
+}
+
+/**
+ * Recria a linha da edição, apagando o que houver dela. Idempotência da ingestão:
+ * re-rodar uma edição regrava do zero em vez de duplicar.
+ */
+async function recriarEdicao(
+  numero: number,
+  dataPublicacao: Date,
+  enxuta: boolean,
+): Promise<string> {
+  const existente = await prisma.edicaoRpi.findUnique({ where: { numero } });
+  if (existente) {
+    await prisma.despacho.deleteMany({ where: { edicaoRpiId: existente.id } });
+    await prisma.edicaoRpi.delete({ where: { id: existente.id } });
+    console.log(`[rpi] edição ${numero} já existia — regravando do zero.`);
+  }
+  const edicao = await prisma.edicaoRpi.create({
+    data: { numero, dataPublicacao, enxuta },
+  });
+  return edicao.id;
+}
+
+/**
+ * MODO ENXUTO — grava só os despachos que casaram com marca monitorada.
+ *
+ * A revista inteira é baixada, parseada e **cruzada por completo** (inclusive o
+ * motor de similaridade, que precisa ver todos os nomes da edição para achar
+ * colidência). O que muda é só o que sobra no banco: em vez das ~35 mil linhas da
+ * edição, ficam as poucas que são suas.
+ *
+ * Isso é o que torna possível consumir 2026 inteiro de graça: alerta, prazo e
+ * colidência saem com a mesma fidelidade do modo completo, a ~0 byte por edição.
+ * O que se abre mão é do Histórico RPI navegável para despacho de terceiro naquela
+ * edição — que continua no PDF oficial, linkado em /revistas.
+ */
+async function ingerirEdicaoEnxuta(
+  numero: number,
+  revista: { dataPublicacao: Date; despachos: ReturnType<typeof parseRevista>['despachos'] },
+): Promise<ResumoCruzamento> {
+  const marcas = await carregarMarcasRpi();
+  const edicaoId = await recriarEdicao(numero, revista.dataPublicacao, true);
+
+  if (marcas.length === 0) {
+    console.log('[rpi] nenhuma marca monitorada de fonte rpi — nada a gravar no modo enxuto.');
+    return { ...RESUMO_VAZIO };
+  }
+
+  // Ids gerados aqui, não pelo banco: são a chave que liga o cruzamento em memória
+  // à linha que será inserida. Deixar o banco gerar exigiria confiar na ordem de
+  // retorno de um createMany, que não é garantia que valha a pena assumir.
+  const candidatos = revista.despachos.map((d) => ({ id: randomUUID() as string, origem: d }));
+  const paraCruzar: DespachoParaCruzamento[] = candidatos.map((c) => ({
+    id: c.id,
+    processo: c.origem.processo,
+    nomeMarca: c.origem.nomeMarca,
+    classeNcl: c.origem.classeNcl,
+    codigo: c.origem.codigo,
+  }));
+  const cruzamentos = cruzarDespachos(marcas, paraCruzar);
+
+  const porId = new Map(candidatos.map((c) => [c.id, c.origem]));
+  const linhas = cruzamentos.map((c) => {
+    const d = porId.get(c.despachoId)!;
+    return {
+      id: c.despachoId,
+      edicaoRpiId: edicaoId,
+      marcaId: c.marcaId,
+      alertaPendente: c.alerta,
+      processo: d.processo,
+      codigo: d.codigo,
+      textoDespacho: d.nomeDespacho || null,
+      textoComplementar: d.textoComplementar,
+      nomeMarca: d.nomeMarca,
+      titular: d.titular,
+      classeNcl: d.classeNcl,
+      dataPublicacao: revista.dataPublicacao,
+    };
+  });
+  for (let i = 0; i < linhas.length; i += LOTE_INSERT) {
+    await prisma.despacho.createMany({ data: linhas.slice(i, i + LOTE_INSERT) });
+  }
+  console.log(
+    `[rpi] modo enxuto: ${linhas.length} de ${revista.despachos.length} despacho(s) gravado(s) ` +
+      `(só os das suas marcas).`,
+  );
+
+  return finalizarCruzamento(cruzamentos, paraCruzar, marcas, revista.dataPublicacao);
+}
+
 async function ingerirEdicao(
   numero: number,
+  enxuto = MODO_ENXUTO_PADRAO,
 ): Promise<{ status: 'nao-publicada' } | ({ status: 'ok' } & ResumoCruzamento)> {
   const resultado = await baixarEdicao(numero);
   if (resultado.status === 'nao-publicada') {
@@ -195,7 +332,10 @@ async function ingerirEdicao(
       `${revista.despachos.length} despachos parseados`,
   );
 
-  // Idempotência: transação apaga e regrava a edição se ela já existir parcialmente.
+  if (enxuto) {
+    return { status: 'ok', ...(await ingerirEdicaoEnxuta(numero, revista)) };
+  }
+
   const edicaoId = await prisma.$transaction(
     async (tx) => {
       const existente = await tx.edicaoRpi.findUnique({ where: { numero } });
@@ -206,7 +346,7 @@ async function ingerirEdicao(
       }
 
       const edicao = await tx.edicaoRpi.create({
-        data: { numero, dataPublicacao: revista.dataPublicacao },
+        data: { numero, dataPublicacao: revista.dataPublicacao, enxuta: false },
       });
 
       for (let i = 0; i < revista.despachos.length; i += LOTE_INSERT) {
@@ -244,11 +384,24 @@ async function recruzarEdicoes(quantidade: number): Promise<void> {
   const edicoes = await prisma.edicaoRpi.findMany({
     orderBy: { numero: 'desc' },
     take: quantidade,
-    select: { id: true, numero: true, dataPublicacao: true },
+    select: { id: true, numero: true, dataPublicacao: true, enxuta: true },
   });
   if (edicoes.length === 0) {
     console.log('[rpi] nenhuma edição ingerida ainda — nada a recruzar.');
     return;
+  }
+
+  // Edição enxuta não tem despacho de terceiro no banco: recruzar sobre ela
+  // devolveria "nada encontrado" para uma marca nova, que é resposta errada
+  // disfarçada de resposta. Avisa alto e manda pelo caminho que funciona.
+  const enxutas = edicoes.filter((e) => e.enxuta).map((e) => e.numero);
+  if (enxutas.length > 0) {
+    console.warn(
+      `[rpi] ATENÇÃO: ${enxutas.length} edição(ões) no intervalo foram processadas no modo ` +
+        `enxuto (${enxutas.join(', ')}) — elas só guardam os despachos que já eram de alguma ` +
+        'marca. Recruzar não vê o resto e diria "sem movimentação" para uma marca nova. ' +
+        `Para essas, use: npm run ingest:rpi -- --backfill=${Math.min(...enxutas)} --forcar`,
+    );
   }
 
   let casados = 0;
@@ -338,12 +491,221 @@ async function gerarPrazosRetroativo(quantidade: number): Promise<void> {
   console.log(`[rpi] backfill concluído: ${total} prazo(s) gerado(s).`);
 }
 
+/**
+ * Backfill histórico: `npm run ingest:rpi -- --backfill[=EDICAO_INICIAL] [--max=N]`.
+ *
+ * A ingestão normal só anda para a frente (última + 1), então o histórico anterior
+ * à primeira rodada nunca entraria sozinho. Este modo percorre o intervalo desde a
+ * primeira edição de 2026 até a atual, **pulando o que já está no banco**, e para
+ * na primeira edição ainda não publicada.
+ *
+ * Duas propriedades que importam mais que a velocidade:
+ * - **Resumível**: cada edição é uma transação própria. Interromper no meio (ou
+ *   estourar o timeout do runner) deixa o que já entrou íntegro, e rodar de novo
+ *   continua de onde parou em vez de recomeçar.
+ * - **Não re-notifica**: cada edição passa pelo mesmo cruzamento da ingestão
+ *   normal, que só olha despacho sem marca vinculada. Alerta já enviado pela Fase 6
+ *   não volta para a fila.
+ *
+ * Cuidado de capacidade, medido em 02/08/2026: cada edição ocupa ~15 MB no Postgres
+ * (~35 mil despachos). O backfill de 2026 inteiro são ~400 MB — acima do que sobra
+ * no plano free do Neon (0,5 GB). Rode sabendo disso.
+ */
+async function backfill(
+  desde: number,
+  maximo: number,
+  opcoes: { enxuto: boolean; forcar: boolean },
+): Promise<void> {
+  const ingeridas = (
+    await prisma.edicaoRpi.findMany({ select: { numero: true }, orderBy: { numero: 'asc' } })
+  ).map((e) => e.numero);
+  const maiorIngerida = ingeridas.length ? Math.max(...ingeridas) : desde;
+
+  // Até a última já ingerida saem os buracos conhecidos; daí para a frente o loop
+  // continua até o INPI responder "ainda não publicada".
+  // Com --forcar, reprocessa também as que já existem: é o caminho para converter
+  // edições completas em enxutas (ou o contrário) e para re-cruzar edição enxuta
+  // contra uma marca cadastrada depois.
+  const alvos = opcoes.forcar
+    ? Array.from({ length: maiorIngerida - desde + 1 }, (_, i) => desde + i)
+    : edicoesFaltantes(ingeridas, desde, maiorIngerida);
+  console.log(
+    `[rpi] backfill${opcoes.enxuto ? ' (modo enxuto)' : ''} a partir da RPI ${desde}: ` +
+      `${alvos.length} edição(ões) a processar até a ${maiorIngerida}` +
+      (maximo < Infinity ? ` (teto de ${maximo} nesta rodada)` : ''),
+  );
+
+  const log = await prisma.logExecucao.create({
+    data: { tipo: 'backfill_rpi', status: 'executando', detalhes: { desde, faltando: alvos.length } },
+  });
+  const processadas: number[] = [];
+  let despachosCasados = 0;
+  let alertas = 0;
+  let prazos = 0;
+  const inicio = Date.now();
+
+  try {
+    let proxima = maiorIngerida + 1;
+    for (const numero of alvos) {
+      if (processadas.length >= maximo) break;
+      const r = await ingerirEdicao(numero, opcoes.enxuto);
+      if (r.status === 'nao-publicada') continue; // buraco real no INPI, não erro.
+      processadas.push(numero);
+      despachosCasados += r.despachosCasados;
+      alertas += r.alertas;
+      prazos += r.prazos;
+      console.log(
+        `[rpi] backfill: ${processadas.length}/${Math.min(alvos.length, maximo)} — ` +
+          `${((Date.now() - inicio) / 60_000).toFixed(1)} min decorridos`,
+      );
+    }
+
+    // Depois dos buracos, avança até a edição ainda não publicada.
+    while (processadas.length < maximo) {
+      const r = await ingerirEdicao(proxima, opcoes.enxuto);
+      if (r.status === 'nao-publicada') break;
+      processadas.push(proxima);
+      despachosCasados += r.despachosCasados;
+      alertas += r.alertas;
+      prazos += r.prazos;
+      proxima++;
+    }
+
+    await prisma.logExecucao.update({
+      where: { id: log.id },
+      data: {
+        status: 'sucesso',
+        mensagem: `Backfill: ${processadas.length} edição(ões) — ${despachosCasados} despacho(s) de marcas monitoradas, ${alertas} com alerta, ${prazos} prazo(s)`,
+        detalhes: { processadas, despachosCasados, alertas, prazos },
+        finalizadoEm: new Date(),
+      },
+    });
+    console.log(
+      `[rpi] backfill concluído em ${((Date.now() - inicio) / 60_000).toFixed(1)} min: ` +
+        `${processadas.length} edição(ões) ingerida(s)` +
+        (processadas.length ? ` (${processadas[0]}–${processadas[processadas.length - 1]})` : ''),
+    );
+  } catch (e) {
+    await prisma.logExecucao.update({
+      where: { id: log.id },
+      data: {
+        status: 'erro',
+        mensagem: (e as Error).message,
+        detalhes: { processadas },
+        finalizadoEm: new Date(),
+      },
+    });
+    throw e;
+  }
+}
+
+/**
+ * Janela móvel do Histórico RPI: `npm run ingest:rpi -- --limpar[=N] [--dry-run]`.
+ *
+ * Existe por uma restrição medida, não por elegância: cada edição ocupa ~19 MB e o
+ * plano free do Neon tem 0,5 GB. Guardar 2026 inteiro (~570 MB) trava a escrita no
+ * banco — e banco travado significa ingestão semanal parada, que é o oposto do que
+ * este sistema existe para fazer.
+ *
+ * O que ele **nunca** apaga, e essa é a parte que importa:
+ * - `edicoes_rpi` — o catálogo inteiro continua na seção Revistas INPI, com o
+ *   download apontando para o INPI. Nenhuma revista some da tela.
+ * - **todo despacho vinculado a uma marca monitorada** (`marca_id` preenchido),
+ *   de qualquer edição. É o histórico que é seu, e é dele que penduram os `prazos`
+ *   (que cairiam junto, por `ON DELETE CASCADE`).
+ *
+ * O que sai é só o "resto da revista" antigo: despacho de processo de terceiro que
+ * nunca casou com nada seu. Se um dia ele fizer falta, a edição continua baixável
+ * e `--backfill` a traz de volta.
+ *
+ * Nota sobre espaço: o Postgres reaproveita o espaço liberado nas próximas
+ * inserções, mas só devolve ao disco com `VACUUM FULL despachos`. Para o objetivo
+ * aqui — parar de crescer — o reaproveitamento já basta.
+ */
+async function limparAntigos(manter: number, dryRun: boolean): Promise<void> {
+  const edicoes = await prisma.edicaoRpi.findMany({
+    orderBy: { numero: 'desc' },
+    select: { id: true, numero: true },
+  });
+  const antigas = edicoes.slice(manter);
+  if (antigas.length === 0) {
+    console.log(`[rpi] ${edicoes.length} edição(ões) no banco, janela de ${manter} — nada a limpar.`);
+    return;
+  }
+
+  const alvo = {
+    edicaoRpiId: { in: antigas.map((e) => e.id) },
+    marcaId: null, // nunca toca no que casou com marca monitorada.
+  };
+  const aRemover = await prisma.despacho.count({ where: alvo });
+  const vinculadosPreservados = await prisma.despacho.count({
+    where: { edicaoRpiId: { in: antigas.map((e) => e.id) }, marcaId: { not: null } },
+  });
+
+  console.log(
+    `[rpi] janela de ${manter} edição(ões): ${antigas.length} edição(ões) fora dela ` +
+      `(RPI ${antigas[antigas.length - 1].numero}–${antigas[0].numero}).`,
+  );
+  console.log(
+    `[rpi] ${aRemover.toLocaleString('pt-BR')} despacho(s) de terceiros a remover; ` +
+      `${vinculadosPreservados.toLocaleString('pt-BR')} vinculado(s) a marca sua serão mantidos.`,
+  );
+  if (dryRun) {
+    console.log('[rpi] --dry-run: nada foi apagado.');
+    return;
+  }
+
+  // Uma edição por vez: uma remoção de centenas de milhares de linhas numa
+  // transação só estoura o timeout e desfaz o trabalho inteiro.
+  let removidos = 0;
+  for (const edicao of antigas) {
+    const r = await prisma.despacho.deleteMany({
+      where: { edicaoRpiId: edicao.id, marcaId: null },
+    });
+    removidos += r.count;
+    console.log(`[rpi]   RPI ${edicao.numero}: ${r.count.toLocaleString('pt-BR')} removido(s)`);
+  }
+  console.log(
+    `[rpi] limpeza concluída: ${removidos.toLocaleString('pt-BR')} despacho(s) removido(s). ` +
+      'As revistas continuam listadas e baixáveis em /revistas.',
+  );
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) {
     throw new Error(
       'DATABASE_URL não definida. No GitHub Actions, confira se o Repository secret ' +
         'DATABASE_URL existe (Settings → Secrets and variables → Actions → aba Secrets).',
     );
+  }
+
+  // --enxuto/--completo sobrepõem o padrão de RPI_MODO_ENXUTO por rodada.
+  const enxuto = process.argv.includes('--completo')
+    ? false
+    : process.argv.includes('--enxuto') || MODO_ENXUTO_PADRAO;
+
+  const flagBackfill = process.argv.slice(2).find((a) => a.startsWith('--backfill'));
+  if (flagBackfill) {
+    const flagMax = process.argv.slice(2).find((a) => a.startsWith('--max='));
+    const desde = Number(flagBackfill.split('=')[1]) || PRIMEIRA_EDICAO_2026;
+    const maximo = Number(flagMax?.split('=')[1]) || Infinity;
+    try {
+      await backfill(desde, maximo, { enxuto, forcar: process.argv.includes('--forcar') });
+    } finally {
+      await prisma.$disconnect();
+    }
+    return;
+  }
+
+  const flagLimpar = process.argv.slice(2).find((a) => a.startsWith('--limpar'));
+  if (flagLimpar) {
+    const dryRun = process.argv.includes('--dry-run');
+    try {
+      await limparAntigos(Number(flagLimpar.split('=')[1]) || 12, dryRun);
+    } finally {
+      await prisma.$disconnect();
+    }
+    return;
   }
 
   const flagRecruzar = process.argv.slice(2).find((a) => a.startsWith('--recruzar'));

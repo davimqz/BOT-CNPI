@@ -46,6 +46,17 @@ export default async function HistoricoPage({
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const where = montarFiltro(params);
 
+  // Edição enxuta guarda só os despachos das marcas monitoradas (CLAUDE.md 3.1.1).
+  // Sem este aviso, filtrar por ela e ver pouco/nada se lê como "a revista não
+  // teve movimentação", quando o certo é "o resto dela não está aqui".
+  const numeroFiltrado = Number(params.edicao);
+  const edicaoFiltrada = Number.isInteger(numeroFiltrado)
+    ? await prisma.edicaoRpi.findUnique({
+        where: { numero: numeroFiltrado },
+        select: { enxuta: true },
+      })
+    : null;
+
   const [total, despachos, edicoes] = await Promise.all([
     prisma.despacho.count({ where }),
     prisma.despacho.findMany({
@@ -123,6 +134,19 @@ export default async function HistoricoPage({
           Filtrar
         </button>
       </form>
+
+      {edicaoFiltrada?.enxuta && (
+        <p className="mb-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          Desta edição, o sistema guardou <strong>apenas os despachos das suas marcas</strong> — ela
+          foi baixada e verificada por inteiro, mas os processos de terceiros não ficaram no banco.
+          Uma lista curta (ou vazia) aqui significa &quot;nada das suas marcas&quot;, não &quot;nada
+          aconteceu&quot;. A revista completa está no{' '}
+          <Link href="/revistas" className="underline">
+            PDF oficial
+          </Link>
+          .
+        </p>
+      )}
 
       <p className="mb-3 text-sm opacity-70">
         {total.toLocaleString('pt-BR')} despacho(s) — página {pagina} de {totalPaginas}

@@ -10,6 +10,15 @@ export default function Home() {
       </header>
       <nav className="mb-8 flex flex-wrap gap-4">
         <Link
+          href="/revistas"
+          className="inline-block rounded border border-black/15 px-4 py-3 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+        >
+          <span className="block font-medium">Revistas INPI</span>
+          <span className="block text-sm opacity-70">
+            Todas as edições desde janeiro de 2026, com download
+          </span>
+        </Link>
+        <Link
           href="/historico"
           className="inline-block rounded border border-black/15 px-4 py-3 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
         >

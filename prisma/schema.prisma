@@ -154,12 +154,23 @@ model Prazo {
   @@map("prazos")
 }
 
-// Cache local de cada edição da RPI já processada.
+// Cache local de cada edição da RPI já processada. É também o catálogo da tela
+// /revistas (Revistas INPI) — e por isso NUNCA é apagado pela limpeza da janela
+// móvel: o histórico de revistas continua completo mesmo sem os despachos.
 model EdicaoRpi {
   id             String   @id @default(cuid())
   numero         Int      @unique
   dataPublicacao DateTime @map("data_publicacao")
   processadoEm   DateTime @default(now()) @map("processado_em")
+  // Edição processada no MODO ENXUTO: foi baixada e cruzada por inteiro, mas só
+  // os despachos que casaram com marca monitorada foram gravados. Alerta, prazo e
+  // colidência têm a mesma fidelidade do modo completo; o que não existe aqui é o
+  // despacho de terceiro para navegar no Histórico RPI.
+  //
+  // A coluna existe para o `--recruzar` não dar resposta silenciosamente errada:
+  // recruzar uma edição enxuta encontraria "nada" e uma marca nova concluiria que
+  // não houve movimentação, quando na verdade os dados nunca estiveram no banco.
+  enxuta         Boolean  @default(false)
 
   despachos Despacho[]
 
