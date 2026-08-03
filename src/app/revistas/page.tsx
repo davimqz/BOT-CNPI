@@ -19,7 +19,7 @@ function Caixa({ revista }: { revista: RevistaCatalogo }) {
         <span className="block text-sm opacity-70">
           {dataBr(revista.data)}
           {revista.dataEstimada && (
-            <span title="Data estimada pela cadência semanal — a edição ainda não foi ingerida, então a data oficial não foi lida do arquivo.">
+            <span title="Data calculada pela publicação semanal de terça-feira. O sistema não abriu esta edição, então a data não veio do arquivo oficial.">
               {' '}
               (estimada)
             </span>
@@ -27,25 +27,9 @@ function Caixa({ revista }: { revista: RevistaCatalogo }) {
         </span>
       </div>
 
-      <p className="text-xs opacity-70">
-        {/* Só oferece o link quando há o que ver. Numa edição sem despacho
-            guardado, "Ver despachos" levaria a uma tabela vazia que se lê como
-            "não houve movimentação nesta revista" — e o que ela significa é
-            "nada das suas marcas". Beco sem saída que informa errado. */}
-        {revista.ingerida && (revista.despachos ?? 0) > 0 ? (
-          <Link href={`/historico?edicao=${revista.numero}`} className="underline">
-            Ver despachos
-          </Link>
-        ) : revista.ingerida ? (
-          <span>Sem movimentação das suas marcas</span>
-        ) : (
-          // Não é erro: a revista existe no INPI e continua baixável aqui. O que
-          // falta é ela estar no banco, e esconder isso faria o usuário achar que
-          // o Histórico RPI cobre um mês que na verdade não foi processado.
-          <span>Não processada — download disponível</span>
-        )}
-      </p>
-
+      {/* Esta área é catálogo e download, e só. Estado de processamento nosso
+          (edição lida ou não, quantos despachos, se houve movimentação) não
+          pertence aqui — é assunto do Histórico RPI e dos alertas. */}
       <div className="mt-auto pt-1 text-xs">
         <a
           href={revista.urlPdf}
@@ -62,24 +46,14 @@ function Caixa({ revista }: { revista: RevistaCatalogo }) {
 }
 
 export default async function RevistasPage() {
+  // A edição só entra aqui para dar a data oficial de publicação; o conteúdo dela
+  // não é assunto desta tela, então nada de contar despachos.
   const edicoes = await prisma.edicaoRpi.findMany({
     orderBy: { numero: 'desc' },
-    select: {
-      numero: true,
-      dataPublicacao: true,
-      processadoEm: true,
-      _count: { select: { despachos: true } },
-    },
+    select: { numero: true, dataPublicacao: true },
   });
 
-  const catalogo = montarCatalogo(
-    edicoes.map((e) => ({
-      numero: e.numero,
-      dataPublicacao: e.dataPublicacao,
-      processadoEm: e.processadoEm,
-      despachos: e._count.despachos,
-    })),
-  );
+  const catalogo = montarCatalogo(edicoes);
   const anos = agruparPorAnoMes(catalogo);
 
   return (
@@ -110,10 +84,7 @@ export default async function RevistasPage() {
           <section key={ano.ano}>
             <h2 className="mb-4 border-b border-black/10 pb-2 text-xl font-semibold dark:border-white/15">
               {ano.ano}
-              <span className="ml-3 text-sm font-normal opacity-70">
-                {ano.total} revista(s)
-                {ano.ingeridas < ano.total && ` — ${ano.ingeridas} ingerida(s)`}
-              </span>
+              <span className="ml-3 text-sm font-normal opacity-70">{ano.total} revista(s)</span>
             </h2>
 
             <div className="space-y-6">

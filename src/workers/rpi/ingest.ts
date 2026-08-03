@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 import type { Cruzamento, DespachoParaCruzamento } from '@/lib/verificacao';
 import { cruzarDespachos, motivoDoVinculo } from '@/lib/verificacao';
 import { prazosDoDespacho, statusPorData } from '@/lib/prazos';
-import { PRIMEIRA_EDICAO_2026, edicoesFaltantes } from '@/lib/revistas';
+import { PRIMEIRA_EDICAO_MONITORADA, edicoesFaltantes } from '@/lib/revistas';
 import { baixarEdicao } from './download';
 import { parseRevista } from './parse';
 
@@ -33,16 +33,17 @@ async function determinarProximaEdicao(): Promise<number> {
   const ultima = await prisma.edicaoRpi.aggregate({ _max: { numero: true } });
   if (ultima._max.numero) return ultima._max.numero + 1;
 
-  // Banco vazio: o sistema começa em janeiro de 2026 (RPI 2870), não na edição
-  // da semana. Semente explícita (argumento ou RPI_EDICAO_INICIAL) ainda vence,
-  // para o caso de só se querer a edição corrente.
+  // Banco vazio: começa na primeira edição que interessa monitorar (a do depósito
+  // do pedido), não na edição da semana nem em janeiro. Semente explícita
+  // (argumento ou RPI_EDICAO_INICIAL) ainda vence.
   const argumentoSemente = process.argv.slice(2).find((a) => !a.startsWith('--'));
   const informada = process.env.RPI_EDICAO_INICIAL ?? argumentoSemente;
   if (informada === undefined) {
     console.log(
-      `[rpi] banco sem edições — começando pela RPI ${PRIMEIRA_EDICAO_2026} (primeira de 2026).`,
+      `[rpi] banco sem edições — começando pela RPI ${PRIMEIRA_EDICAO_MONITORADA} ` +
+        '(semana do depósito do pedido).',
     );
-    return PRIMEIRA_EDICAO_2026;
+    return PRIMEIRA_EDICAO_MONITORADA;
   }
 
   const semente = Number(informada);
@@ -687,7 +688,7 @@ async function main() {
   const flagBackfill = process.argv.slice(2).find((a) => a.startsWith('--backfill'));
   if (flagBackfill) {
     const flagMax = process.argv.slice(2).find((a) => a.startsWith('--max='));
-    const desde = Number(flagBackfill.split('=')[1]) || PRIMEIRA_EDICAO_2026;
+    const desde = Number(flagBackfill.split('=')[1]) || PRIMEIRA_EDICAO_MONITORADA;
     const maximo = Number(flagMax?.split('=')[1]) || Infinity;
     try {
       await backfill(desde, maximo, { enxuto, forcar: process.argv.includes('--forcar') });

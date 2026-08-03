@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   PRIMEIRA_EDICAO_2026,
+  PRIMEIRA_EDICAO_MONITORADA,
   agruparPorAnoMes,
   dataEstimada,
   edicoesFaltantes,
@@ -13,11 +14,9 @@ import {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-const ingerida = (numero: number, data: string, despachos = 100): EdicaoIngerida => ({
+const ingerida = (numero: number, data: string): EdicaoIngerida => ({
   numero,
   dataPublicacao: new Date(`${data}T00:00:00.000Z`),
-  processadoEm: new Date('2026-08-01T12:00:00.000Z'),
-  despachos,
 });
 
 test('edição 2870 é a primeira de 2026 e cai em 06/01', () => {
@@ -48,12 +47,37 @@ test('URLs de download seguem o padrão confirmado do INPI', () => {
   assert.equal(urlPdfMarcas(2897), 'https://revistas.inpi.gov.br/pdf/Marcas2897.pdf');
 });
 
+test('a edição em que o banco começa a consumir é a 2896, de 07/07/2026', () => {
+  assert.equal(PRIMEIRA_EDICAO_MONITORADA, 2896);
+  assert.equal(iso(dataEstimada(PRIMEIRA_EDICAO_MONITORADA)), '2026-07-07');
+});
+
+// O catálogo (janeiro) e a ingestão (2896) começam em pontos diferentes de
+// propósito: listar uma revista custa zero, porque o download é do INPI. Se os
+// dois números fossem o mesmo, restringir a ingestão apagaria meio ano da tela.
+test('catálogo começa em janeiro mesmo consumindo só da 2896 em diante', () => {
+  const ingeridas = [2896, 2897, 2898, 2899].map((n, i) =>
+    ingerida(n, ['2026-07-07', '2026-07-14', '2026-07-21', '2026-07-28'][i]),
+  );
+  const catalogo = montarCatalogo(ingeridas);
+
+  assert.equal(catalogo.length, 30);
+  assert.equal(catalogo[catalogo.length - 1].numero, PRIMEIRA_EDICAO_2026);
+  assert.equal(catalogo.filter((r) => !r.dataEstimada).length, 4);
+
+  const anos = agruparPorAnoMes(catalogo);
+  assert.deepEqual(
+    anos[0].meses.map((m) => m.rotulo),
+    ['julho', 'junho', 'maio', 'abril', 'março', 'fevereiro', 'janeiro'],
+  );
+});
+
 test('catálogo é contínuo: edição não ingerida aparece marcada, não some', () => {
   const catalogo = montarCatalogo([ingerida(2897, '2026-07-14'), ingerida(2899, '2026-07-28')], {
     desde: 2897,
   });
   assert.deepEqual(
-    catalogo.map((r) => [r.numero, r.ingerida]),
+    catalogo.map((r) => [r.numero, !r.dataEstimada]),
     [
       [2899, true],
       [2898, false],
@@ -90,7 +114,6 @@ test('agrupamento: ano → mês, do mais recente para o mais antigo, com contage
   assert.equal(anos.length, 1);
   assert.equal(anos[0].ano, 2026);
   assert.equal(anos[0].total, 5);
-  assert.equal(anos[0].ingeridas, 5);
   assert.deepEqual(
     anos[0].meses.map((m) => [m.rotulo, m.revistas.length]),
     [

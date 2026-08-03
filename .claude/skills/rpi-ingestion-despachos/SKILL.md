@@ -61,8 +61,23 @@ A cadência é **exatamente semanal**: `data(N) = 06/01/2026 + (N − 2870) × 7
 2896 → 07/07, 2897 → 14/07, 2899 → 28/07) — nenhum salto.
 
 > **A RPI 2870, de 06/01/2026, é a primeira edição de 2026** (a 2869 é de 30/12/2025). É a
-> constante `PRIMEIRA_EDICAO_2026` em `src/lib/revistas.ts`, e é onde o sistema começa a puxar
-> quando o banco está vazio.
+> constante `PRIMEIRA_EDICAO_2026` em `src/lib/revistas.ts`.
+
+**Duas constantes, dois papéis — não as unifique** (`src/lib/revistas.ts`):
+
+| Constante | Valor | Papel |
+|---|---|---|
+| `PRIMEIRA_EDICAO_2026` | 2870 (06/01/2026) | Onde o **catálogo** da tela `/revistas` começa |
+| `PRIMEIRA_EDICAO_MONITORADA` | 2896 (07/07/2026) | Onde a **ingestão** começa |
+
+O catálogo lista desde janeiro porque revista é material de referência e listar custa zero — o
+download aponta para o INPI. A ingestão começa na 2896 porque foi a semana do depósito do pedido do
+usuário, e **antes do depósito não existe processo para movimentar**: cruzar janeiro a junho
+procuraria uma marca que ainda não tinha dado entrada. Unificar as duas ou faz a tela perder meio
+ano de revistas, ou faz o banco engolir 26 edições que, por construção, não têm nada.
+
+Ao monitorar uma marca mais antiga, `PRIMEIRA_EDICAO_MONITORADA` é o número a baixar, e
+`--backfill=<numero>` cobre o intervalo novo.
 
 Trate a fórmula como **estimativa exibível, nunca como fonte de verdade**: a data que vale é a que
 vem no XML da edição. A tela `/revistas` marca "(estimada)" enquanto a edição não foi ingerida,

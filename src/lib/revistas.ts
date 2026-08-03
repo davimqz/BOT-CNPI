@@ -14,6 +14,24 @@
  */
 export const PRIMEIRA_EDICAO_2026 = 2870;
 
+/**
+ * Primeira edição que o banco **consome**: RPI 2896 (07/07/2026), a semana em que
+ * o pedido do usuário foi depositado.
+ *
+ * Não confundir com `PRIMEIRA_EDICAO_2026`, que é onde o *catálogo* da tela
+ * começa. São coisas diferentes de propósito:
+ *
+ * - O catálogo lista desde janeiro porque revista é referência, e listar custa
+ *   zero — o download aponta para o INPI.
+ * - A ingestão começa na 2896 porque **antes do depósito não existe processo para
+ *   movimentar**. Cruzar janeiro a junho procuraria uma marca que ainda não tinha
+ *   dado entrada: gastaria banco e tempo para, por construção, não achar nada.
+ *
+ * Se um dia entrar uma marca mais antiga no monitoramento, este é o número a
+ * baixar — e `--backfill=<numero>` cobre o intervalo novo.
+ */
+export const PRIMEIRA_EDICAO_MONITORADA = 2896;
+
 /** 06/01/2026 em UTC. Todas as datas do sistema são UTC-meia-noite (ver `parse.ts`). */
 const DATA_PRIMEIRA_EDICAO_2026 = Date.UTC(2026, 0, 6);
 
@@ -45,22 +63,22 @@ export function dataEstimada(numero: number): Date {
   return new Date(DATA_PRIMEIRA_EDICAO_2026 + (numero - PRIMEIRA_EDICAO_2026) * UMA_SEMANA_MS);
 }
 
+/**
+ * O mínimo que o catálogo precisa saber de uma edição já processada: o número e a
+ * **data oficial**, lida do XML. Conteúdo (quantos despachos, o que casou) não
+ * entra aqui de propósito — a tela de revistas é catálogo e download, e estado de
+ * processamento nosso não é assunto dela.
+ */
 export interface EdicaoIngerida {
   numero: number;
   dataPublicacao: Date;
-  processadoEm: Date;
-  despachos: number;
 }
 
 export interface RevistaCatalogo {
   numero: number;
   data: Date;
-  /** `true` quando a data é o palpite semanal, porque a edição ainda não foi ingerida. */
+  /** `true` quando a data é o palpite semanal, porque a edição não foi processada. */
   dataEstimada: boolean;
-  ingerida: boolean;
-  /** Despachos gravados no banco; `null` enquanto a edição não foi ingerida. */
-  despachos: number | null;
-  processadoEm: Date | null;
   urlXml: string;
   urlPdf: string;
 }
@@ -79,7 +97,6 @@ export interface AnoRevistas {
   ano: number;
   /** Quantidade de revistas do ano — o "quantidade" pedido, somado dos meses. */
   total: number;
-  ingeridas: number;
   meses: MesRevistas[];
 }
 
@@ -123,9 +140,6 @@ export function montarCatalogo(
       numero,
       data: e?.dataPublicacao ?? dataEstimada(numero),
       dataEstimada: !e,
-      ingerida: Boolean(e),
-      despachos: e?.despachos ?? null,
-      processadoEm: e?.processadoEm ?? null,
       urlXml: urlXmlZip(numero),
       urlPdf: urlPdfMarcas(numero),
     });
@@ -167,7 +181,6 @@ export function agruparPorAnoMes(revistas: RevistaCatalogo[]): AnoRevistas[] {
       return {
         ano,
         total: blocos.reduce((s, m) => s + m.revistas.length, 0),
-        ingeridas: blocos.reduce((s, m) => s + m.revistas.filter((r) => r.ingerida).length, 0),
         meses: blocos,
       };
     });

@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       desde:
-        description: 'Primeira edição a puxar (padrão 2870 = 06/01/2026)'
+        description: 'Primeira edição a puxar (padrão 2896 = 07/07/2026, semana do depósito)'
         required: false
-        default: '2870'
+        default: '2896'
       max:
         description: 'Teto de edições nesta rodada (vazio = todas as que faltarem)'
         required: false
