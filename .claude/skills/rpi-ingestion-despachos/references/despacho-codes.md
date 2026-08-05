@@ -109,6 +109,43 @@ de terceiro. O único prazo acionável nesse caso é opor-se: IPAS009/IPAS756 �
 Gerar "pagamento da concessão" ou "recurso" a partir de um processo alheio seria dar ao usuário
 um prazo que não é dele. Ver `prazosDoDespacho` em `src/lib/prazos.ts`.
 
+## Fluxograma oficial de fases (Índice Geral, página 3 de qualquer edição)
+
+**Fonte de confirmação**: página 3 (Índice Geral) da RPI 2900 (04/08/2026), seção de Marcas —
+baixada em `https://revistas.inpi.gov.br/pdf/Marcas2900.pdf`, página extraída e lida em
+05/08/2026. É o próprio INPI quem agrupa os despachos dessa forma; a numeração de página muda a
+cada edição, mas a estrutura de fases é estável (mesmas 10 seções macro, mesma ordem).
+
+As 10 fases macro, na ordem do índice:
+
+1. Pedido de registro de marca em andamento (exigência de pagamento, exigência formal, publicação
+   para oposição, notificação de oposição, exame de mérito: exigência/sobrestamento/indeferimento/
+   deferimento — e as mesmas variantes "em designação")
+2. Pedidos de registro de marca considerados inexistentes (falta de pagamento da retribuição,
+   cumprimento insatisfatório de exigência de pagamento ou formal)
+3. Pedidos de registro de marca definitivamente arquivados (falta de procuração, de documentos de
+   marca de certificação/coletiva, de resposta à exigência de mérito, de pagamento da concessão)
+4. Desistências de pedidos de registro de marca
+5. Concessões de registros de marca
+6. Registros de marca extintos (fim da vigência, caducidade)
+7. Registros de marca cancelados de ofício
+8. Renúncias a registros de marca
+9. Nulidades administrativas de registros de marca
+10. Caducidades de registros de marca
+
+Implementado em `src/lib/roadmap-marca.ts` (`FASES_ROADMAP`), consumido pela tela de detalhe da
+marca (`/marcas/[id]`). **Cobertura deliberadamente parcial**: um código só entra numa fase quando
+o nome oficial do despacho (tabela acima) deixa a fase inequívoca. Um bloco de códigos é genérico
+por natureza — `IPAS270`/`IPAS271` ("Deferimento"/"Indeferimento da petição"), `IPAS349`, `IPAS699`,
+`IPAS402`, `IPAS403`, `IPAS566`, `IPAS567`, `IPAS337`, `IPAS428`, `IPAS235`, `IPAS237`, `IPAS975` e
+afins decidem QUALQUER tipo de petição (desistência, renúncia, retificação, prioridade...), e o
+Índice Geral só sabe separar o tipo porque agrupa fisicamente o despacho dentro da seção certa do
+PDF — informação que a ingestão não grava hoje (não existe coluna para "seção do índice" em
+`despachos`). Por isso as fases "Desistência" e "Renúncia" ficam sem código próprio no roadmap: são
+mostradas, mas nunca marcadas como alcançadas a partir do código sozinho. Se um dia isso importar o
+bastante para justificar o trabalho, a saída é gravar a seção do índice junto do despacho durante o
+parse do XML (o XML já sabe em qual bloco publicou cada um), não adivinhar pelo código.
+
 ## Todos os códigos confirmados (83), por frequência nas edições 2897+2898
 
 | Código | Nome oficial publicado | Ocorrências |

@@ -4,6 +4,31 @@ import { validarMarca } from '@/lib/marcas';
 
 type Ctx = { params: Promise<{ id: string }> };
 
+export async function GET(_request: Request, { params }: Ctx) {
+  const { id } = await params;
+
+  const marca = await prisma.marcaMonitorada.findUnique({
+    where: { id },
+    include: { cliente: { select: { id: true, nome: true } } },
+  });
+  if (!marca) return NextResponse.json({ erro: 'Marca não encontrada' }, { status: 404 });
+
+  const [despachos, prazos] = await Promise.all([
+    prisma.despacho.findMany({
+      where: { marcaId: id },
+      include: { edicaoRpi: { select: { numero: true } } },
+      orderBy: { dataPublicacao: 'desc' },
+    }),
+    prisma.prazo.findMany({
+      where: { despacho: { marcaId: id } },
+      include: { despacho: { select: { codigo: true, processo: true, dataPublicacao: true } } },
+      orderBy: { dataLimite: 'desc' },
+    }),
+  ]);
+
+  return NextResponse.json({ marca, despachos, prazos });
+}
+
 export async function PATCH(request: Request, { params }: Ctx) {
   const { id } = await params;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
