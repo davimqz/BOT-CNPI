@@ -99,3 +99,35 @@ export function IconeAlertas(props: IconeProps) {
     </Base>
   );
 }
+
+/** Colidências — dois nomes de marca se sobrepondo (a mesma comparação da skill fonética). */
+export function IconeColidencia(props: IconeProps) {
+  return (
+    <Base {...props}>
+      <circle cx="9.5" cy="12" r="6.25" />
+      <circle cx="14.5" cy="12" r="6.25" />
+    </Base>
+  );
+}
+
+/** Patentes — lâmpada da invenção, com o filamento aceso. */
+export function IconePatentes(props: IconeProps) {
+  return (
+    <Base {...props}>
+      <path d="M8.25 9.75a3.75 3.75 0 1 1 7.5 0c0 1.6-.85 2.5-1.6 3.3-.6.65-1.15 1.25-1.15 2.2h-2c0-.95-.55-1.55-1.15-2.2-.75-.8-1.6-1.7-1.6-3.3Z" />
+      <path d="M10.5 18.5h3" />
+      <path d="M11 21h2" />
+      <path d="M12 3v1.5" />
+    </Base>
+  );
+}
+
+/** Desenho Industrial — prancheta de projeto com o traço da forma registrada. */
+export function IconeDesenhoIndustrial(props: IconeProps) {
+  return (
+    <Base {...props}>
+      <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3h11A1.5 1.5 0 0 1 19 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5Z" />
+      <path d="M8.25 15.5 11 9l2 3.5 1.25-2 1.5 3" />
+    </Base>
+  );
+}
