@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useState } from 'react';
 import {
   Sidebar,
   SidebarContent,
@@ -13,47 +14,114 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
 } from '@/components/ui/sidebar';
 import {
   IconeAlertas,
+  IconeColidencia,
   IconeConsulta,
+  IconeDesenhoIndustrial,
   IconeHistorico,
   IconeMarcas,
+  IconePatentes,
   IconePrazos,
   IconeRevistas,
 } from '@/components/icones';
 
+interface ItemFilho {
+  href: string;
+  nome: string;
+  Icone: typeof IconeMarcas;
+  /** Sem `href` correspondente ainda — mostra o item, mas desabilitado, com o motivo no tooltip. */
+  emBreve?: string;
+}
+
+interface GrupoPI {
+  titulo: string;
+  Icone: typeof IconeMarcas;
+  /** Sem itens implementados ainda (Patentes, Desenho Industrial) — grupo inteiro fica desabilitado. */
+  emBreve?: string;
+  itens?: ItemFilho[];
+}
+
 /**
- * Navegação agrupada pelo que o usuário está fazendo, não pela ordem em que as
- * telas foram construídas: primeiro a fonte de dados (revistas, histórico,
- * consulta), depois o que ele acompanha (marcas, prazos), por último o ajuste.
+ * Um dropdown por tipo de propriedade industrial (Marcas hoje; Patentes e
+ * Desenho Industrial entram como irmãos no mesmo nível quando forem
+ * implementados, não aninhados dentro de Marcas — cada um terá seu próprio
+ * modelo de despacho). Revistas e Prazos ficam FORA desses dropdowns porque já
+ * são compartilhados entre os três tipos (mesma edição da RPI, mesmo motor de
+ * prazo) — ver CLAUDE.md Seção 3.1.1.
  */
-const GRUPOS = [
+const GRUPOS_PI: GrupoPI[] = [
   {
-    titulo: 'Fontes',
+    titulo: 'Marcas',
+    Icone: IconeMarcas,
     itens: [
-      { href: '/revistas', nome: 'Revistas INPI', Icone: IconeRevistas },
-      { href: '/historico', nome: 'Histórico RPI', Icone: IconeHistorico },
+      { href: '/marcas', nome: 'Processos', Icone: IconeMarcas },
       { href: '/busca', nome: 'Consulta ao pePI', Icone: IconeConsulta },
+      { href: '/historico', nome: 'Histórico RPI', Icone: IconeHistorico },
+      {
+        href: '/marcas/colidencias',
+        nome: 'Colidências',
+        Icone: IconeColidencia,
+        emBreve:
+          'Em breve — falta persistir o motivo do cruzamento (nome/similaridade) no despacho para dar uma tela própria a essa lista.',
+      },
     ],
   },
   {
-    titulo: 'Acompanhamento',
-    itens: [
-      { href: '/marcas', nome: 'Marcas monitoradas', Icone: IconeMarcas },
-      { href: '/prazos', nome: 'Prazos INPI', Icone: IconePrazos },
-    ],
+    titulo: 'Patentes',
+    Icone: IconePatentes,
+    emBreve: 'Em breve — fase futura do roadmap.',
   },
   {
-    titulo: 'Sistema',
-    itens: [{ href: '/configuracoes', nome: 'Alertas', Icone: IconeAlertas }],
+    titulo: 'Desenho Industrial',
+    Icone: IconeDesenhoIndustrial,
+    emBreve: 'Em breve — fase futura do roadmap.',
   },
+];
+
+const ITENS_COMPARTILHADOS = [
+  { href: '/revistas', nome: 'Revistas INPI', Icone: IconeRevistas },
+  { href: '/prazos', nome: 'Prazos INPI', Icone: IconePrazos },
 ] as const;
+
+function IconeChevron({ aberto }: { aberto: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={`ml-auto size-4 shrink-0 transition-transform ${aberto ? 'rotate-90' : ''}`}
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
 
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+
+  const grupoAtivo = (grupo: GrupoPI) =>
+    (grupo.itens ?? []).some(
+      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+    );
+
+  const [abertos, setAbertos] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(GRUPOS_PI.map((g) => [g.titulo, grupoAtivo(g)])),
+  );
+
+  function alternar(titulo: string) {
+    setAbertos((a) => ({ ...a, [titulo]: !a[titulo] }));
+  }
 
   async function sair() {
     await fetch('/api/logout', { method: 'POST' });
@@ -80,29 +148,103 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {GRUPOS.map((grupo) => (
-          <SidebarGroup key={grupo.titulo}>
-            <SidebarGroupLabel>{grupo.titulo}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {grupo.itens.map(({ href, nome, Icone }) => (
-                  <SidebarMenuItem key={href}>
+        <SidebarGroup>
+          <SidebarGroupLabel>Propriedade Industrial</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {GRUPOS_PI.map((grupo) => {
+                if (grupo.emBreve) {
+                  return (
+                    <SidebarMenuItem key={grupo.titulo}>
+                      <SidebarMenuButton aria-disabled="true" title={grupo.emBreve}>
+                        <grupo.Icone />
+                        <span>{grupo.titulo}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
+                const aberto = abertos[grupo.titulo] ?? false;
+                return (
+                  <SidebarMenuItem key={grupo.titulo}>
                     <SidebarMenuButton
-                      render={<Link href={href} />}
-                      // Prefixo, não igualdade: /prazos?status=pendente e
-                      // /historico?edicao=2899 continuam marcando o item certo.
-                      isActive={pathname === href || pathname.startsWith(`${href}/`)}
-                      tooltip={nome}
+                      onClick={() => alternar(grupo.titulo)}
+                      isActive={grupoAtivo(grupo)}
+                      aria-expanded={aberto}
                     >
-                      <Icone />
-                      <span>{nome}</span>
+                      <grupo.Icone />
+                      <span>{grupo.titulo}</span>
+                      <IconeChevron aberto={aberto} />
                     </SidebarMenuButton>
+                    {aberto && (
+                      <SidebarMenuSub>
+                        {grupo.itens?.map((item) => (
+                          <SidebarMenuSubItem key={item.href}>
+                            {item.emBreve ? (
+                              <SidebarMenuSubButton aria-disabled="true" title={item.emBreve}>
+                                <item.Icone />
+                                <span>{item.nome}</span>
+                              </SidebarMenuSubButton>
+                            ) : (
+                              <SidebarMenuSubButton
+                                render={<Link href={item.href} />}
+                                isActive={
+                                  pathname === item.href || pathname.startsWith(`${item.href}/`)
+                                }
+                              >
+                                <item.Icone />
+                                <span>{item.nome}</span>
+                              </SidebarMenuSubButton>
+                            )}
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    )}
                   </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>INPI</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {ITENS_COMPARTILHADOS.map(({ href, nome, Icone }) => (
+                <SidebarMenuItem key={href}>
+                  <SidebarMenuButton
+                    render={<Link href={href} />}
+                    isActive={pathname === href || pathname.startsWith(`${href}/`)}
+                    tooltip={nome}
+                  >
+                    <Icone />
+                    <span>{nome}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Sistema</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/configuracoes" />}
+                  isActive={
+                    pathname === '/configuracoes' || pathname.startsWith('/configuracoes/')
+                  }
+                  tooltip="Alertas"
+                >
+                  <IconeAlertas />
+                  <span>Alertas</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>

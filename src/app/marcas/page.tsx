@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { EVENTOS_ALERTA, eventoPorSlug } from '@/lib/eventos-alerta';
 import { THRESHOLD_PADRAO, THRESHOLDS } from '@/lib/similaridade';
 
@@ -66,6 +67,7 @@ function resumoEventos(eventosAlerta: string[]): string {
 }
 
 export default function MarcasPage() {
+  const router = useRouter();
   const [marcas, setMarcas] = useState<Marca[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -535,7 +537,16 @@ export default function MarcasPage() {
           </thead>
           <tbody>
             {marcas.map((m) => (
-              <tr key={m.id} className="border-t border-black/5 align-top dark:border-white/10">
+              <tr
+                key={m.id}
+                onClick={() => router.push(`/marcas/${m.id}`)}
+                role="link"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') router.push(`/marcas/${m.id}`);
+                }}
+                className="cursor-pointer border-t border-black/5 align-top hover:bg-black/[0.03] dark:border-white/10 dark:hover:bg-white/[0.05]"
+              >
                 <td className="px-3 py-2 font-medium">{m.nome}</td>
                 <td className="px-3 py-2 font-mono">{m.processo ?? '—'}</td>
                 <td className="px-3 py-2">{m.classeNcl ?? '—'}</td>
@@ -566,17 +577,29 @@ export default function MarcasPage() {
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
-                  <button onClick={() => editar(m)} className="underline opacity-80 hover:opacity-100">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      editar(m);
+                    }}
+                    className="underline opacity-80 hover:opacity-100"
+                  >
                     editar
                   </button>
                   <button
-                    onClick={() => alternarAtiva(m)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      alternarAtiva(m);
+                    }}
                     className="ml-3 underline opacity-80 hover:opacity-100"
                   >
                     {m.ativa ? 'desativar' : 'reativar'}
                   </button>
                   <button
-                    onClick={() => excluir(m)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      excluir(m);
+                    }}
                     className="ml-3 text-red-600 underline opacity-80 hover:opacity-100 dark:text-red-400"
                   >
                     excluir
