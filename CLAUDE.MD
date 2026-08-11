@@ -121,8 +121,23 @@ devolve `EAUTH`, que não diz nada a ele.
   `usuarios.email`).
 - SMTP continua implementado como fallback (`ConfigEmail` em `src/lib/email.ts`) para quem quiser
   servidor próprio e para não ficar refém de um serviço externo.
-- Remetente em **subdomínio dedicado** (ex: `avisos@avisos.trilhafinance.com.br`): isola a
-  reputação de envio do domínio principal.
+- Remetente é o **domínio raiz** (`avisos@trilhafinance.com.br`), não um subdomínio dedicado —
+  revertido em 11/08/2026 (ver nota abaixo). Se um dia o plano do Resend permitir mais de um
+  domínio, reavaliar a volta ao subdomínio pelo motivo original: isolar a reputação de envio do
+  domínio principal.
+
+> **Nota (11/08/2026)**: a intenção original era subdomínio dedicado
+> (`avisos@avisos.trilhafinance.com.br`), mas o **plano gratuito do Resend só permite 1 domínio por
+> conta**, e a única vaga já estava ocupada por `trilhafinance.com.br` (cadastrado em 05/08/2026,
+> nunca verificado). Cadastrar o subdomínio como segundo domínio foi recusado pela API
+> (`"Your plan includes 1 domain. Upgrade to add more."`). Causa raiz de um alerta que não saiu: o
+> `EMAIL_REMETENTE` apontava pro subdomínio, mas nenhum domínio verificado no Resend cobria esse
+> endereço — Resend nunca ia aceitar o envio, independente de DNS. Corrigido trocando
+> `EMAIL_REMETENTE` para `avisos@trilhafinance.com.br` (secret do GitHub Actions e `.env` locais
+> atualizados; **falta atualizar a Environment Variable equivalente no Vercel**, ver Seção 3.3) e
+> mantendo o domínio raiz como o único cadastrado. DNS (registros DKIM/SPF que o Resend pede)
+> segue como responsabilidade do operador — reconferir status em resend.com/domains antes de
+> assumir que está verificado.
 
 Por que isso importa mais aqui que num app comum: **alerta de prazo que cai em spam equivale a
 alerta não enviado**, e o sistema inteiro existe para evitar prazo perdido. Deliverability é
