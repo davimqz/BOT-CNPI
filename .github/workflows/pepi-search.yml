@@ -39,15 +39,35 @@ jobs:
 
       - run: npm ci
 
+      # O binário do Chromium (~habitualmente 100+MB) não muda entre buscas — só
+      # quando a versão do playwright em package-lock.json muda. Cachear evita
+      # baixar o navegador do zero a cada busca sob demanda (custava 1-3min).
+      # As dependências de SO (`install-deps`) não ficam no cache (são pacotes
+      # apt instalados na VM efêmera), mas reinstalá-las sem baixar o navegador
+      # de novo é rápido.
+      - name: Cache do navegador Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Instalar navegador do Playwright
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
-      # Falha alto se o pePI mudou de layout — nunca confiar em resultados de
-      # uma estrutura de página não reconhecida (skill pepi-scraping-playbook).
-      - name: Sanidade do pePI (estrutura da página)
-        run: npm run sanity:pepi
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Instalar dependências de SO do Playwright (cache do navegador já quente)
+        if: steps.cache-playwright.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # A sanidade (npm run sanity:pepi) NÃO roda mais aqui em toda busca — ela
+      # abria uma sessão completa de login+query só para validar layout, dobrando
+      # o tempo de cada busca sob demanda. Ela roda 1x/dia no pepi-monitor.yml.
+      # Trade-off consciente: se o pePI mudar de layout entre uma rodada diária
+      # e outra, uma busca sob demanda nessa janela pode não ser pega pela
+      # sanidade — mas `search.ts` já lança SiteMudouError inline quando um
+      # formulário/elemento esperado não é encontrado, então não fica cego.
+      # Ver skill pepi-scraping-playbook.
 
       - name: Buscar no pePI
         run: npm run search:pepi

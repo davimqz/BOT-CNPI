@@ -34,8 +34,20 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache do navegador Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Instalar navegador do Playwright
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Instalar dependências de SO do Playwright (cache do navegador já quente)
+        if: steps.cache-playwright.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       # Falha alto se o pePI mudou de layout — sem isso, uma mudança de página
       # apareceria como "todos os processos sumiram" em vez de erro (skill
