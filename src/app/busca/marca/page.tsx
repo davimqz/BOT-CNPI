@@ -7,9 +7,27 @@ import { useEffect, useRef, useState } from 'react';
 // (nunca no Vercel — CLAUDE.md Seção 3.1): o POST cria o job e dispara o
 // workflow; aqui fazemos polling do status até o resultado aparecer, sempre
 // mostrando a etapa atual para o usuário nunca ficar sem feedback.
+//
+// O formulário replica as 3 abas da tela real "Marca" do pePI — Pesquisa
+// Básica (nº processo/GRU/protocolo/inscrição internacional), Marca
+// (radical/exata + classe NCL) e Titular (nome ou CPF/CNPJ) — cada uma com
+// seus próprios campos, para não misturar estado entre buscas de tipos
+// diferentes. O dropdown "Nº de Processos por página" (20-100) que existe
+// nas telas reais foi omitido de propósito: o worker sempre pede 100/página
+// e agrega todas as páginas antes de exibir (ver search.ts) — não há
+// paginação de tela aqui, então o controle não teria efeito nenhum.
 
 const POLL_MS = 3000;
 const TIMEOUT_MS = 8 * 60 * 1000;
+
+type Aba = 'basica' | 'marca' | 'titular';
+type TipoBusca = 'radical' | 'exata' | 'processo' | 'titular';
+
+const ABAS: { id: Aba; rotulo: string }[] = [
+  { id: 'basica', rotulo: 'Pesquisa Básica' },
+  { id: 'marca', rotulo: 'Marca' },
+  { id: 'titular', rotulo: 'Titular' },
+];
 
 interface ItemResultado {
   processo: string;
@@ -44,13 +62,64 @@ interface JobStatus {
 }
 
 export default function BuscaMarcaPage() {
-  const [termo, setTermo] = useState('');
-  const [tipoBusca, setTipoBusca] = useState<'radical' | 'exata' | 'processo' | 'titular'>('radical');
+  const [aba, setAba] = useState<Aba>('marca');
+
+  // Campos independentes por aba — trocar de aba não perde o que foi digitado
+  // nas outras, e cada aba só manda ao worker os campos que ela realmente tem.
+  //
+  // A Pesquisa Básica tem 4 campos visíveis (réplica da tela real), mas o pePI
+  // só tem UM campo de busca ali (NumPedido — ver selectors.ts) que aceita
+  // qualquer um dos 4 identificadores: preencher um desabilita os outros 3,
+  // para não dar a entender que dá pra buscar por vários ao mesmo tempo.
+  const CAMPOS_BASICA = [
+    ['processo', 'Nº do Processo'],
+    ['gru', 'Nº Guia de Recolhimento da União (GRU)'],
+    ['protocolo', 'Nº do Protocolo'],
+    ['inscricaoInternacional', 'Nº Inscrição Internacional'],
+  ] as const;
+  type CampoBasica = (typeof CAMPOS_BASICA)[number][0];
+  const [valoresBasica, setValoresBasica] = useState<Record<CampoBasica, string>>({
+    processo: '',
+    gru: '',
+    protocolo: '',
+    inscricaoInternacional: '',
+  });
+  const campoBasicaAtivo = (Object.keys(valoresBasica) as CampoBasica[]).find(
+    (c) => valoresBasica[c] !== '',
+  );
+  function alterarCampoBasica(campo: CampoBasica, valor: string) {
+    setValoresBasica((prev) => ({ ...prev, [campo]: valor }));
+  }
+  const [termoMarca, setTermoMarca] = useState('');
+  const [subTipoMarca, setSubTipoMarca] = useState<'radical' | 'exata'>('radical');
   const [classeNcl, setClasseNcl] = useState('');
-  const porProcesso = tipoBusca === 'processo';
-  const porTitular = tipoBusca === 'titular';
-  const comClasseNcl = !porProcesso && !porTitular;
+
+  // Titular também é 1 campo só no pePI (interpretarTermoTitular decide nome vs
+  // CPF/CNPJ pelo formato do valor) — mesmo padrão de "preencher um desabilita
+  // o outro" da Pesquisa Básica, pra deixar explícito que é um OU outro.
+  const CAMPOS_TITULAR = [
+    ['nome', 'Nome / Razão Social'],
+    ['cpfCnpj', 'CPF/CNPJ'],
+  ] as const;
+  type CampoTitular = (typeof CAMPOS_TITULAR)[number][0];
+  const [valoresTitular, setValoresTitular] = useState<Record<CampoTitular, string>>({
+    nome: '',
+    cpfCnpj: '',
+  });
+  const campoTitularAtivo = (Object.keys(valoresTitular) as CampoTitular[]).find(
+    (c) => valoresTitular[c] !== '',
+  );
+  function alterarCampoTitular(campo: CampoTitular, valor: string) {
+    setValoresTitular((prev) => ({ ...prev, [campo]: valor }));
+  }
+
   const [job, setJob] = useState<JobStatus | null>(null);
+  // Tipo/termo que efetivamente geraram os resultados exibidos — não a aba
+  // selecionada no momento, para o usuário poder trocar de aba sem que a
+  // tabela de resultados (e as ações específicas de titular) mude de leitura.
+  const [buscaAtual, setBuscaAtual] = useState<{ tipo: TipoBusca; termo: string } | null>(null);
+  const porProcesso = buscaAtual?.tipo === 'processo';
+  const porTitular = buscaAtual?.tipo === 'titular';
   const [buscando, setBuscando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
   const [segundos, setSegundos] = useState(0);
@@ -72,12 +141,26 @@ export default function BuscaMarcaPage() {
 
   async function buscar(e: React.FormEvent) {
     e.preventDefault();
-    await iniciarBusca(termo);
+    if (aba === 'basica' && !campoBasicaAtivo) {
+      setErroEnvio('Preencha um dos campos da Pesquisa Básica');
+      return;
+    }
+    if (aba === 'titular' && !campoTitularAtivo) {
+      setErroEnvio('Preencha Nome ou CPF/CNPJ');
+      return;
+    }
+    const tipo: TipoBusca = aba === 'basica' ? 'processo' : aba === 'titular' ? 'titular' : subTipoMarca;
+    const termoBusca = aba === 'basica'
+      ? valoresBasica[campoBasicaAtivo!]
+      : aba === 'titular'
+        ? valoresTitular[campoTitularAtivo!]
+        : termoMarca;
+    await iniciarBusca(termoBusca, tipo);
   }
 
   // Também chamada ao escolher um titular na lista devolvida pela busca por
   // titular ambígua — dispara um novo job com o nome exato do titular.
-  async function iniciarBusca(termoBusca: string) {
+  async function iniciarBusca(termoBusca: string, tipo: TipoBusca) {
     setErroEnvio(null);
     setJob(null);
     setBuscando(true);
@@ -86,6 +169,7 @@ export default function BuscaMarcaPage() {
     setMonitoradas(new Map());
     setLoteMsg(null);
     setLoteErro(null);
+    setBuscaAtual({ tipo, termo: termoBusca });
     cancelado.current = false;
 
     try {
@@ -94,8 +178,8 @@ export default function BuscaMarcaPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           termo: termoBusca,
-          tipoBusca,
-          classeNcl: comClasseNcl ? classeNcl || undefined : undefined,
+          tipoBusca: tipo,
+          classeNcl: tipo === 'radical' || tipo === 'exata' ? classeNcl || undefined : undefined,
         }),
       });
       const data = (await resp.json()) as { jobId?: string; erro?: string };
@@ -113,7 +197,7 @@ export default function BuscaMarcaPage() {
           setJob(s);
           if (s.status === 'sucesso' || s.status === 'erro') {
             setBuscando(false);
-            if (porTitular && s.resultado?.itens?.length) {
+            if (tipo === 'titular' && s.resultado?.itens?.length) {
               void carregarMonitoradas(s.resultado.itens.map((i) => i.processo));
             }
             return;
@@ -223,69 +307,112 @@ export default function BuscaMarcaPage() {
         alguns segundos a ~2 minutos (fila do runner + navegação no site do INPI).
       </p>
 
-      <form onSubmit={buscar} className="mb-6 flex flex-wrap items-end gap-3 text-sm">
-        <label className="block flex-1 basis-52">
-          <span className="mb-1 block opacity-70">
-            {porProcesso
-              ? 'Nº do processo'
-              : porTitular
-                ? 'Titular (nome/razão social ou CPF/CNPJ)'
-                : 'Nome da marca'}
-          </span>
-          <input
-            value={termo}
-            onChange={(e) => setTermo(e.target.value)}
-            placeholder={
-              porProcesso
-                ? 'ex: 923456789 (só dígitos)'
-                : porTitular
-                  ? 'ex: NATURA COSMÉTICOS S/A ou 71.673.990/0001-77'
-                  : 'ex: NATURA'
-            }
-            required
-            minLength={2}
-            pattern={porProcesso ? '\\d{6,12}' : undefined}
-            title={porProcesso ? 'Apenas os dígitos do número do processo (6 a 12)' : undefined}
+      <div className="mb-4 flex gap-1 border-b border-black/10 text-sm dark:border-white/15">
+        {ABAS.map(({ id, rotulo }) => (
+          <button
+            key={id}
+            type="button"
             disabled={buscando}
-            className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
-          />
-        </label>
-        <fieldset className="block" disabled={buscando}>
-          <span className="mb-1 block opacity-70">Tipo de busca</span>
-          <div className="flex gap-3 rounded border border-black/20 px-3 py-1.5 dark:border-white/20">
-            {(
-              [
-                ['radical', 'Radical'],
-                ['exata', 'Exata'],
-                ['processo', 'Nº de processo'],
-                ['titular', 'Titular'],
-              ] as const
-            ).map(([t, rotulo]) => (
-              <label key={t} className="flex cursor-pointer items-center gap-1.5">
+            onClick={() => setAba(id)}
+            className={`-mb-px rounded-t border-b-2 px-4 py-2 font-medium disabled:opacity-50 ${
+              aba === id
+                ? 'border-foreground opacity-100'
+                : 'border-transparent opacity-60 hover:opacity-90'
+            }`}
+          >
+            {rotulo}
+          </button>
+        ))}
+      </div>
+
+      <form onSubmit={buscar} className="mb-6 flex flex-wrap items-end gap-3 text-sm">
+        {aba === 'basica' && (
+          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+            {CAMPOS_BASICA.map(([campo, rotulo]) => (
+              <label key={campo} className="block">
+                <span className="mb-1 block opacity-70">{rotulo}</span>
                 <input
-                  type="radio"
-                  name="tipoBusca"
-                  checked={tipoBusca === t}
-                  onChange={() => setTipoBusca(t)}
+                  value={valoresBasica[campo]}
+                  onChange={(e) => alterarCampoBasica(campo, e.target.value)}
+                  placeholder="só dígitos"
+                  minLength={2}
+                  disabled={buscando || (campoBasicaAtivo !== undefined && campoBasicaAtivo !== campo)}
+                  title="Preencha apenas um destes 4 campos por busca"
+                  className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 disabled:opacity-40 dark:border-white/20"
                 />
-                {rotulo}
               </label>
             ))}
           </div>
-        </fieldset>
-        {comClasseNcl && (
-          <label className="block w-28">
-            <span className="mb-1 block opacity-70">Classe NCL</span>
-            <input
-              value={classeNcl}
-              onChange={(e) => setClasseNcl(e.target.value)}
-              placeholder="opcional"
-              pattern="\d{1,2}"
-              disabled={buscando}
-              className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
-            />
-          </label>
         )}
+
+        {aba === 'marca' && (
+          <>
+            <fieldset className="block" disabled={buscando}>
+              <span className="mb-1 block opacity-70">Tipo de busca</span>
+              <div className="flex gap-3 rounded border border-black/20 px-3 py-1.5 dark:border-white/20">
+                {(
+                  [
+                    ['radical', 'Radical'],
+                    ['exata', 'Exata'],
+                  ] as const
+                ).map(([t, rotulo]) => (
+                  <label key={t} className="flex cursor-pointer items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="subTipoMarca"
+                      checked={subTipoMarca === t}
+                      onChange={() => setSubTipoMarca(t)}
+                    />
+                    {rotulo}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="block flex-1 basis-52">
+              <span className="mb-1 block opacity-70">Marca</span>
+              <input
+                value={termoMarca}
+                onChange={(e) => setTermoMarca(e.target.value)}
+                placeholder="ex: NATURA"
+                required
+                minLength={2}
+                disabled={buscando}
+                className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
+              />
+            </label>
+            <label className="block w-32">
+              <span className="mb-1 block opacity-70">Classificação Nice - NCL</span>
+              <input
+                value={classeNcl}
+                onChange={(e) => setClasseNcl(e.target.value)}
+                placeholder="opcional"
+                pattern="\d{1,2}"
+                disabled={buscando}
+                className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 dark:border-white/20"
+              />
+            </label>
+          </>
+        )}
+
+        {aba === 'titular' && (
+          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+            {CAMPOS_TITULAR.map(([campo, rotulo]) => (
+              <label key={campo} className="block">
+                <span className="mb-1 block opacity-70">{rotulo}</span>
+                <input
+                  value={valoresTitular[campo]}
+                  onChange={(e) => alterarCampoTitular(campo, e.target.value)}
+                  placeholder={campo === 'nome' ? 'ex: NATURA COSMÉTICOS S/A' : 'ex: 71.673.990/0001-77'}
+                  minLength={2}
+                  disabled={buscando || (campoTitularAtivo !== undefined && campoTitularAtivo !== campo)}
+                  title="Preencha apenas um destes 2 campos por busca"
+                  className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 disabled:opacity-40 dark:border-white/20"
+                />
+              </label>
+            ))}
+          </div>
+        )}
+
         <button
           type="submit"
           disabled={buscando}
@@ -348,8 +475,8 @@ export default function BuscaMarcaPage() {
                   type="button"
                   disabled={buscando}
                   onClick={() => {
-                    setTermo(nome);
-                    void iniciarBusca(nome);
+                    setValoresTitular({ nome, cpfCnpj: '' });
+                    void iniciarBusca(nome, 'titular');
                   }}
                   className="w-full px-3 py-2 text-left hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
                   title="Listar os processos deste titular"
