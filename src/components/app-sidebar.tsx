@@ -69,13 +69,7 @@ const GRUPOS_PI: GrupoPI[] = [
     Icone: IconeConsulta,
     itens: [
       { href: '/busca', nome: 'Pesquisa da Propriedade Industrial (pePI)', Icone: IconeConsulta },
-      {
-        href: '/marcas/colidencias',
-        nome: 'Colidências',
-        Icone: IconeColidencia,
-        emBreve:
-          'Em breve — falta persistir o motivo do cruzamento (nome/similaridade) no despacho para dar uma tela própria a essa lista.',
-      },
+      { href: '/marcas/colidencias', nome: 'Colidências', Icone: IconeColidencia },
     ],
   },
   {
