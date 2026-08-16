@@ -53,7 +53,7 @@ interface GrupoPI {
  * Um dropdown por tipo de propriedade industrial (Marcas hoje; Patentes e
  * Desenho Industrial entram como irmãos no mesmo nível quando forem
  * implementados, não aninhados dentro de Marcas — cada um terá seu próprio
- * modelo de despacho). "Análise Prévia de Viabilidade" é transversal aos três
+ * modelo de despacho). "Consulta Prévia de Viabilidade" é transversal aos três
  * tipos (é pesquisa ao vivo antes de decidir depositar, não acompanhamento de
  * um processo já existente), por isso fica como grupo irmão, não dentro de
  * Marcas. Revistas, Prazos e Caixa de Mensagem ficam FORA desses dropdowns
@@ -65,7 +65,7 @@ interface GrupoPI {
  */
 const GRUPOS_PI: GrupoPI[] = [
   {
-    titulo: 'Análise Prévia de Viabilidade',
+    titulo: 'Consulta Prévia de Viabilidade',
     Icone: IconeConsulta,
     itens: [
       { href: '/busca', nome: 'Pesquisa da Propriedade Industrial (pePI)', Icone: IconeConsulta },
