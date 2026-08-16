@@ -29,6 +29,21 @@ jobs:
   search:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Container oficial do Playwright: já vem com o Chromium E as dependências
+    # de SO pré-instaladas (não precisa mais de `playwright install --with-deps`
+    # nem de cachear o binário do navegador — isso sozinho cortava 15-40s por
+    # busca sob demanda, numa VM efêmera onde pacote de sistema via apt nunca
+    # ficava em cache de verdade). A tag de versão PRECISA acompanhar a versão
+    # do `playwright` em package.json/package-lock.json (hoje 1.62.0) — se
+    # atualizar o pacote, atualizar a tag da imagem junto, senão a versão do
+    # driver Node diverge da versão do navegador dentro da imagem.
+    # `--user 1001`: roda como não-root — o Chromium recusa abrir o sandbox
+    # como root (`chromium.launch()` em search.ts não passa `--no-sandbox`), e
+    # containers de job do GitHub Actions rodam como root por padrão sem essa
+    # opção. Padrão documentado oficialmente em playwright.dev/docs/ci.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-jammy
+      options: --user 1001
     steps:
       - uses: actions/checkout@v4
 
@@ -37,28 +52,26 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
-
-      # O binário do Chromium (~habitualmente 100+MB) não muda entre buscas — só
-      # quando a versão do playwright em package-lock.json muda. Cachear evita
-      # baixar o navegador do zero a cada busca sob demanda (custava 1-3min).
-      # As dependências de SO (`install-deps`) não ficam no cache (são pacotes
-      # apt instalados na VM efêmera), mas reinstalá-las sem baixar o navegador
-      # de novo é rápido.
-      - name: Cache do navegador Playwright
-        id: cache-playwright
+      # node_modules só muda quando package-lock.json muda — cachear evita
+      # reinstalar 750+ pacotes (~20-25s) a cada busca sob demanda.
+      - name: Cache de node_modules
+        id: cache-node-modules
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
-      - name: Instalar navegador do Playwright
-        if: steps.cache-playwright.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
+      - name: Instalar dependências
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
 
-      - name: Instalar dependências de SO do Playwright (cache do navegador já quente)
-        if: steps.cache-playwright.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+      # `npm ci` roda `prisma generate` no postinstall, mas node_modules cacheado
+      # não carrega `src/generated/prisma` (fica fora de node_modules e é
+      # gitignored) — regenerar aqui é rápido (~200ms) e evita pular esse passo
+      # quando o cache acima bate.
+      - name: Gerar cliente Prisma (cache de node_modules já quente)
+        if: steps.cache-node-modules.outputs.cache-hit == 'true'
+        run: npx prisma generate
 
       # A sanidade (npm run sanity:pepi) NÃO roda mais aqui em toda busca — ela
       # abria uma sessão completa de login+query só para validar layout, dobrando
