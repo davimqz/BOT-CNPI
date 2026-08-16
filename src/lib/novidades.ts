@@ -25,7 +25,7 @@
  */
 
 import { prisma } from './db';
-import { agruparAlertas, type DespachoVinculado, type MarcaDoAlerta } from './alertas';
+import { agruparAlertas, ehColidencia, type DespachoVinculado, type MarcaDoAlerta } from './alertas';
 import { despachoDisparaAlerta } from './eventos-alerta';
 import { statusDoDespacho } from './relatorio/alerta-despacho';
 
@@ -211,4 +211,151 @@ export async function marcarNovidadesVistas(
     update: { alertasVistosEm: agora },
   });
   return agora;
+}
+
+/**
+ * Caixa de Mensagem — inbox persistente das notificações dos processos
+ * acompanhados (pedido do usuário, 16/08/2026), construída sobre a MESMA
+ * fonte de verdade deste arquivo: `despachos` vinculados a marca + o marco
+ * `alertas_vistos_em`. Não existe tabela de notificação própria — guardar
+ * "que uma notificação existiu" separado do despacho que a originou seria
+ * duplicar um fato que já está no banco (CLAUDE.md Seção 5: não adicionar
+ * estrutura de dados por "pode ser útil depois").
+ *
+ * A diferença para `carregarNovidades` é o agrupamento: o pop-up junta TODOS
+ * os despachos de uma marca desde o último "já vi" num card só (ele só
+ * precisa dizer "há novidade"). A caixa de mensagem precisa listar cada
+ * notificação que de fato chegaria como alerta, então agrupa por
+ * marca+colidência+edição da RPI (ou dia, na fonte pePI) — a mesma unidade
+ * que motivaria um e-mail. "Lida" é derivado, não gravado por item: um grupo
+ * está lido quando todos os despachos que o compõem são anteriores ao marco.
+ */
+
+export interface ItemCaixaMensagem extends NovidadeMarca {
+  /** Chave estável do grupo (marca+colidência+edição/dia) — usada como key de lista. */
+  chave: string;
+  lida: boolean;
+}
+
+export interface CaixaMensagens {
+  itens: ItemCaixaMensagem[];
+  total: number;
+  totalNaoLidas: number;
+}
+
+/** Teto da consulta ao banco — ver LIMITE_CONSULTA acima para o mesmo raciocínio. */
+const LIMITE_CAIXA = 1000;
+
+function chaveDoEvento(d: DespachoNovo, colidencia: boolean): string {
+  const marco = d.edicaoRpi != null ? `rpi:${d.edicaoRpi}` : `pepi:${d.dataPublicacao.toISOString().slice(0, 10)}`;
+  return `${d.marca.id}|${colidencia}|${marco}`;
+}
+
+export function agruparCaixaMensagens(
+  despachos: (DespachoNovo & { criadoEm: Date })[],
+  desde: Date | null,
+): ItemCaixaMensagem[] {
+  const relevantes = despachos.filter((d) =>
+    despachoDisparaAlerta(d.marca.eventosAlerta, d.codigo),
+  );
+
+  const grupos = new Map<string, { colidencia: boolean; despachos: (DespachoNovo & { criadoEm: Date })[] }>();
+  for (const d of relevantes) {
+    const colidencia = ehColidencia(d);
+    const chave = chaveDoEvento(d, colidencia);
+    const grupo = grupos.get(chave);
+    if (grupo) grupo.despachos.push(d);
+    else grupos.set(chave, { colidencia, despachos: [d] });
+  }
+
+  const itens = [...grupos.entries()].map(([chave, g]) => {
+    const recente = [...g.despachos].sort(
+      (a, b) => b.dataPublicacao.getTime() - a.dataPublicacao.getTime(),
+    )[0];
+    return {
+      chave,
+      marcaId: recente.marca.id,
+      marcaNome: recente.marca.nome,
+      colidencia: g.colidencia,
+      quantidade: g.despachos.length,
+      status: statusDoDespacho(recente),
+      processo: recente.processo,
+      dataPublicacao: recente.dataPublicacao,
+      edicaoRpi: recente.edicaoRpi,
+      lida: desde != null && g.despachos.every((d) => d.criadoEm <= desde),
+    };
+  });
+
+  return itens.sort((a, b) => b.dataPublicacao.getTime() - a.dataPublicacao.getTime());
+}
+
+export async function carregarCaixaMensagens(usuarioId: string): Promise<CaixaMensagens> {
+  const config = await prisma.configuracaoAlerta.findUnique({ where: { usuarioId } });
+  const desde = config?.alertasVistosEm ?? null;
+
+  const linhas = await prisma.despacho.findMany({
+    where: { marcaId: { not: null } },
+    select: {
+      id: true,
+      processo: true,
+      nomeMarca: true,
+      classeNcl: true,
+      codigo: true,
+      textoDespacho: true,
+      dataPublicacao: true,
+      criadoEm: true,
+      edicaoRpi: { select: { numero: true } },
+      marca: {
+        select: { id: true, nome: true, processo: true, classeNcl: true, eventosAlerta: true },
+      },
+    },
+    orderBy: { criadoEm: 'desc' },
+    take: LIMITE_CAIXA,
+  });
+
+  const despachos: (DespachoNovo & { criadoEm: Date })[] = linhas.map((d) => ({
+    id: d.id,
+    processo: d.processo,
+    nomeMarca: d.nomeMarca,
+    classeNcl: d.classeNcl,
+    codigo: d.codigo,
+    textoDespacho: d.textoDespacho,
+    dataPublicacao: d.dataPublicacao,
+    criadoEm: d.criadoEm,
+    edicaoRpi: d.edicaoRpi?.numero ?? null,
+    marca: {
+      id: d.marca!.id,
+      nome: d.marca!.nome,
+      processo: d.marca!.processo,
+      classeNcl: d.marca!.classeNcl,
+      eventosAlerta: d.marca!.eventosAlerta,
+      destinatario: null,
+    },
+  }));
+
+  const itens = agruparCaixaMensagens(despachos, desde);
+  return {
+    itens,
+    total: itens.length,
+    totalNaoLidas: itens.filter((i) => !i.lida).length,
+  };
+}
+
+/** Forma enviada à tela — mesmo raciocínio de `paraUI` acima. */
+export type ItemCaixaMensagemUI = Omit<ItemCaixaMensagem, 'dataPublicacao'> & {
+  dataPublicacao: string;
+};
+
+export interface CaixaMensagensUI {
+  itens: ItemCaixaMensagemUI[];
+  total: number;
+  totalNaoLidas: number;
+}
+
+export function caixaMensagensParaUI(c: CaixaMensagens): CaixaMensagensUI {
+  return {
+    total: c.total,
+    totalNaoLidas: c.totalNaoLidas,
+    itens: c.itens.map((i) => ({ ...i, dataPublicacao: i.dataPublicacao.toISOString() })),
+  };
 }

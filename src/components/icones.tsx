@@ -131,3 +131,35 @@ export function IconeDesenhoIndustrial(props: IconeProps) {
     </Base>
   );
 }
+
+/** Cadastrar Processo — documento novo, com o "+" de criação. */
+export function IconeCadastrar(props: IconeProps) {
+  return (
+    <Base {...props}>
+      <path d="M6.5 3h7.7a1.5 1.5 0 0 1 1.06.44l3.3 3.3A1.5 1.5 0 0 1 19 7.8v11.7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5v-15A1.5 1.5 0 0 1 6.5 3Z" />
+      <path d="M14 3v4.5h4.5" />
+      <path d="M12 12v5" />
+      <path d="M9.5 14.5h5" />
+    </Base>
+  );
+}
+
+/** Acompanhar Processo — olho aberto sobre o processo em curso. */
+export function IconeAcompanhar(props: IconeProps) {
+  return (
+    <Base {...props}>
+      <path d="M3 12s3.5-6.25 9-6.25S21 12 21 12s-3.5 6.25-9 6.25S3 12 3 12Z" />
+      <circle cx="12" cy="12" r="2.75" />
+    </Base>
+  );
+}
+
+/** Caixa de Mensagem — envelope com a aba fechada, o aviso que chegou. */
+export function IconeCaixaMensagem(props: IconeProps) {
+  return (
+    <Base {...props}>
+      <path d="M4.5 6.5A1.5 1.5 0 0 1 6 5h12a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 18 19H6a1.5 1.5 0 0 1-1.5-1.5Z" />
+      <path d="m5 6.5 7 6 7-6" />
+    </Base>
+  );
+}
