@@ -102,23 +102,34 @@ auto-suspensão). Reconferir antes de decidir, como todo tier citado neste docum
 
 ### 3.1.2 O piso de latência da busca sob demanda, e o caminho pago para reduzi-lo (registrado em 16/08/2026, não implementado)
 
-Medido ao vivo em 16/08/2026 (dois runs reais do `pepi-search.yml`, termo "NATURA", tipo exata):
-a consulta em si contra o pePI levou **5-9s**, mas o job inteiro levou **1min2s-1min11s**. A
-diferença inteira é overhead fixo do desenho atual, não da automação de navegador — e esse
-overhead tem piso, não importa quanto se otimize *dentro* dele:
+Medido ao vivo em 16/08/2026 (vários runs reais do `pepi-search.yml`, termo "NATURA", tipo exata):
+a consulta em si contra o pePI levou **5-9s** em todos os testes, mas o job inteiro variou de
+**50s a 2min8s** dependendo do que estava em cache. A diferença inteira é overhead fixo do desenho
+atual, não da automação de navegador — e esse overhead tem piso, não importa quanto se otimize
+*dentro* dele:
 
 | Etapa | Custo típico | Por que não dá pra zerar dentro do GitHub Actions |
 |---|---|---|
 | Fila até um runner pegar o job | alguns segundos, às vezes mais | Não existe "runner reservado" no free tier — é fila compartilhada |
 | `checkout` + `setup-node` + cache do npm | ~10-15s | Ambiente novo a cada run |
-| `npm ci` (ou restaurar `node_modules` cacheado + `prisma generate`) | ~5-25s | VM efêmera: nada sobrevive entre runs a não ser o que `actions/cache` explicitamente guarda |
-| Chromium + deps de SO | ~0s desde 16/08/2026 (container `mcr.microsoft.com/playwright:v1.62.0-jammy` já vem com os dois) | Antes disso, `install-deps` via apt sozinho custava 15-40s, porque pacote de sistema instalado numa VM que morre no fim do job nunca fica em cache de verdade |
+| `npm ci` (ou restaurar `node_modules` cacheado via `actions/cache` + `prisma generate`) | ~10-25s | VM efêmera: nada sobrevive entre runs a não ser o que `actions/cache` explicitamente guarda |
+| Chromium + deps de SO (`actions/cache` do binário + `install-deps` via apt) | ~15-20s com cache do binário quente | `install-deps` reinstala pacote de sistema toda vez — não dá pra cachear apt numa VM que morre no fim do job |
 | **A busca em si** | **5-9s** (medido; o playbook `pepi-scraping-playbook` documenta variação de 20-150s em dias ruins) | Esse é o único número que tem a ver com o INPI, não com o nosso pipeline |
 
-Depois do container do Playwright + cache de `node_modules` (aplicado em 16/08/2026 nos dois
-workflows que abrem navegador), o piso realista fica em torno de **~30-40s fixos + a consulta**.
-Não dá pra descer muito mais que isso **dentro do modelo "cada busca = uma VM nova"**, porque fila
-de runner e bootstrap de ambiente são inerentes a esse modelo, não bugs de configuração.
+**Tentativa registrada e descartada**: trocar as duas últimas linhas (cache do binário + apt) pelo
+container oficial `mcr.microsoft.com/playwright:v1.62.0-jammy` (que já vem com Chromium e deps de
+SO prontos) parecia eliminar esse custo de vez. **Na prática piorou** — dois runs deram 1min7s e
+2min8s, contra 1min2s da abordagem com cache. Causa: runners hospedados do GitHub **não retêm
+camadas de imagem Docker entre execuções**; cada job baixava a imagem (~1,5GB+) do zero, gastando
+uns 35s de pull que superava o `install-deps` que deveria substituir. Revertido no mesmo dia — ver
+histórico de `pepi-search.yml`/`pepi-monitor.yml`. Não reintroduzir essa ideia sem confirmar que
+esse comportamento de cache de imagem mudou (seria uma mudança do lado do GitHub, não do projeto).
+
+Depois de cache de `node_modules` + cache do binário do Chromium (os dois via `actions/cache`,
+aplicados em 16/08/2026), o melhor resultado medido com as duas caches já quentes foi **50s**. Esse
+é o piso realista **dentro do modelo "cada busca = uma VM nova"** — fila de runner e bootstrap de
+ambiente são inerentes a esse modelo, não bugs de configuração, e não têm mais gordura óbvia pra
+cortar sem sair dele.
 
 #### O que resolveria de verdade: um worker permanente, fora do GitHub Actions
 
