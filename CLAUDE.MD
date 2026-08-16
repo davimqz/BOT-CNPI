@@ -100,6 +100,91 @@ Correção de um número que circulou aqui antes: o plano Launch do Neon **não 
 virou pay-as-you-go sem mínimo mensal (US$0,35/GB-mês de storage, US$0,106/CU-hora de compute, com
 auto-suspensão). Reconferir antes de decidir, como todo tier citado neste documento.
 
+### 3.1.2 O piso de latência da busca sob demanda, e o caminho pago para reduzi-lo (registrado em 16/08/2026, não implementado)
+
+Medido ao vivo em 16/08/2026 (dois runs reais do `pepi-search.yml`, termo "NATURA", tipo exata):
+a consulta em si contra o pePI levou **5-9s**, mas o job inteiro levou **1min2s-1min11s**. A
+diferença inteira é overhead fixo do desenho atual, não da automação de navegador — e esse
+overhead tem piso, não importa quanto se otimize *dentro* dele:
+
+| Etapa | Custo típico | Por que não dá pra zerar dentro do GitHub Actions |
+|---|---|---|
+| Fila até um runner pegar o job | alguns segundos, às vezes mais | Não existe "runner reservado" no free tier — é fila compartilhada |
+| `checkout` + `setup-node` + cache do npm | ~10-15s | Ambiente novo a cada run |
+| `npm ci` (ou restaurar `node_modules` cacheado + `prisma generate`) | ~5-25s | VM efêmera: nada sobrevive entre runs a não ser o que `actions/cache` explicitamente guarda |
+| Chromium + deps de SO | ~0s desde 16/08/2026 (container `mcr.microsoft.com/playwright:v1.62.0-jammy` já vem com os dois) | Antes disso, `install-deps` via apt sozinho custava 15-40s, porque pacote de sistema instalado numa VM que morre no fim do job nunca fica em cache de verdade |
+| **A busca em si** | **5-9s** (medido; o playbook `pepi-scraping-playbook` documenta variação de 20-150s em dias ruins) | Esse é o único número que tem a ver com o INPI, não com o nosso pipeline |
+
+Depois do container do Playwright + cache de `node_modules` (aplicado em 16/08/2026 nos dois
+workflows que abrem navegador), o piso realista fica em torno de **~30-40s fixos + a consulta**.
+Não dá pra descer muito mais que isso **dentro do modelo "cada busca = uma VM nova"**, porque fila
+de runner e bootstrap de ambiente são inerentes a esse modelo, não bugs de configuração.
+
+#### O que resolveria de verdade: um worker permanente, fora do GitHub Actions
+
+Para chegar perto dos 5-9s *de ponta a ponta* (não só na consulta), o desenho precisaria trocar
+"cada busca abre uma VM do zero" por "existe um processo Node de longa duração, sempre ligado, com
+o Chromium já instalado e pronto para lançar, que recebe o pedido e executa na hora". Isso elimina
+justamente as linhas da tabela acima que hoje dominam o tempo — fila de runner, checkout, install
+de dependências — porque nenhuma delas acontece de novo a cada busca.
+
+**Como isso ficaria, em detalhe:**
+
+- **Onde rodar**: precisa de um host que fique ligado 24/7 (o oposto do GitHub Actions, que só paga
+  CPU quando um job está rodando). Opções, do mais simples ao mais barato:
+  - **VPS pequena e sempre ligada** (DigitalOcean, Hetzner, Contabo — ~US$4-7/mês pelo menor plano
+    com 1GB+ RAM, que é o mínimo confortável pra rodar Chromium headless sem OOM). Mais simples de
+    raciocinar: uma máquina, um processo, `systemd` cuidando de restart. Sem cold start nenhum,
+    sempre.
+  - **Fly.io** — tem `auto_stop_machines`/`auto_start_machines`, que desliga a máquina quando
+    ociosa e liga sob demanda; isso reintroduz um cold start (bem menor que o do GitHub Actions,
+    mas não zero) a menos que se pague para manter `min_machines_running: 1`, o que aproxima o
+    custo do de uma VPS pequena.
+  - **Railway/Render (planos pagos com serviço "always on")** — parecido com VPS gerenciada; nos
+    planos *free* desses provedores o serviço dorme por inatividade, o que anula o ganho (primeira
+    requisição depois de dormir paga cold start de novo). Só serve se for o plano pago com
+    "always on" explicitamente.
+  - Fica fora de cogitação continuar em cima do GitHub Actions ou do Vercel Hobby: nenhum dos dois
+    oferece "processo que fica ligado esperando" nos tiers gratuitos — é a característica que
+    justamente torna os dois gratuitos (Seção 3.1).
+
+- **Como o pedido chegaria até ele**: hoje a API do Next.js dispara `workflow_dispatch` via API REST
+  do GitHub. Com um worker permanente, o caminho mais direto é a API do Next.js chamar um endpoint
+  HTTP exposto pelo próprio worker (`POST /buscar` com termo/tipo/classe), autenticado por um
+  segredo compartilhado (header tipo `Authorization: Bearer <token>`, guardado como variável de
+  ambiente dos dois lados — nunca no banco, mesma regra da Seção 3.2 para a chave do Resend). O
+  worker grava o resultado em `pepi_search_jobs` do mesmo jeito que hoje — o polling do frontend
+  não muda nada.
+- **Ciclo de vida do navegador**: lançar o Chromium **uma vez**, no boot do processo (`chromium.launch()`
+  fica fora do handler de cada busca), e abrir um `browser.newContext()` novo a cada busca — contexto
+  isolado (cookies/sessão próprios), mas sem pagar o custo de subir o processo do Chromium de novo.
+  O login anônimo (link "Continuar...." → aba nova, ver skill `pepi-scraping-playbook`) ainda precisa
+  rodar por busca, porque a sessão do pePI é por contexto — não dá pra reaproveitar sessão entre
+  buscas concorrentes com segurança. **Reiniciar o processo Chromium periodicamente** (ex.: a cada
+  N buscas ou X horas, não só sob demanda) é necessário — processo de navegador de longa duração
+  vaza memória, e isso é o motivo pelo qual esse worker precisa de supervisão operacional que hoje
+  não existe (o GitHub Actions garante uma VM limpa a cada run "de graça"; um worker permanente não
+  tem esse reset automático).
+- **Fila e rate limit continuam obrigatórios**: a skill `pepi-scraping-playbook` já exige
+  concorrência 1 contra o pePI para não ser bloqueado por uso automatizado — um worker permanente
+  naturalmente mantém isso como fila em memória (array/`p-queue` processando um pedido por vez) em
+  vez de depender da falta de paralelismo do GitHub Actions.
+- **Segurança**: hoje o "servidor" só existe pelo tempo de um job (superfície de ataque mínima). Um
+  processo sempre ligado e alcançável pela internet é infraestrutura de verdade — precisa de
+  firewall/allowlist (só a API do Next.js pode chamar), rotação do segredo compartilhado, e alguém
+  olhando se o processo caiu (o "silêncio" de um worker morto é o mesmo modo de falha perigoso já
+  descrito na Seção 3.3 para e-mail: painel dizendo "ativo" enquanto nada funciona).
+- **O que isso NÃO resolve**: a variação da resposta do próprio pePI (20-150s em dias ruins,
+  documentada na skill) é do lado do INPI, não do nosso pipeline — nem um worker perfeitamente
+  quente muda isso. "5-9s" vira o caso típico/bom, não uma garantia.
+
+**Por que não foi implementado agora**: muda a Seção 3 inteira (a linha "Worker de scraping..." da
+tabela de stack deixa de ser 100% GitHub Actions) e quebra a invariante de custo $0/mês que é
+decisão de arquitetura deliberada deste documento, não um detalhe — decidido em 16/08/2026 manter
+$0/mês e aceitar o piso de ~30-40s+consulta descrito acima. Se esse trade-off mudar (por exemplo,
+se a latência virar bloqueador real de uso, não só incômodo), a alavanca é esta seção, não reabrir
+a investigação do zero.
+
 ### 3.2 E-mail: por que Resend e não "cada usuário com seu SMTP" (revisto em 28/07/2026)
 
 A escolha original era Nodemailer com SMTP configurado pelo usuário, herdada do software de
