@@ -20,6 +20,56 @@ import { useEffect, useRef, useState } from 'react';
 const POLL_MS = 3000;
 const TIMEOUT_MS = 8 * 60 * 1000;
 
+// Explicações de cada campo, no mesmo texto das telas reais do pePI — exibidas
+// no ícone de ajuda ao lado do rótulo (ver InfoTooltip), para o usuário não
+// precisar adivinhar formato/exemplo de cada identificador.
+const AJUDA_BASICA: Record<'processo' | 'gru' | 'protocolo' | 'inscricaoInternacional', string> = {
+  processo:
+    'Número do pedido de registro de marca, atribuído ao depositante no momento do depósito. Tem 9 dígitos. Exemplos: "816527385", "904155196".',
+  gru:
+    'Número da Guia de Recolhimento da União (GRU) usada para pagar o serviço administrativo. Tem 17 dígitos. Exemplo: "00000231109316994".',
+  protocolo:
+    'Número dado à petição protocolada. Tem 12 dígitos. Exemplo: "850110006566".',
+  inscricaoInternacional:
+    'Composto por até 7 números, podendo ter letras ao final. Exemplos: "1356494", "1475235A".',
+};
+
+const AJUDA_MARCA = {
+  marca:
+    'Informe a marca que deseja consultar. Na busca Exata, os resultados trazem as marcas publicadas que contêm exatamente o termo digitado. Na busca Radical, o sistema procura pelo radical — por exemplo, o radical "ter" encontra marcas como "Internacional" e "Internet". A busca radical só aceita termos com três ou mais caracteres; para termos menores, use a busca Exata. Caracteres especiais (como "!") não são considerados, e letras acentuadas são tratadas como se não tivessem acento, com exceção do "Ç". Máximo de 40 caracteres.',
+  ncl:
+    'Código da Classificação de Nice. Informar a classe deixa o resultado da busca mais preciso e mais rápido.',
+};
+
+const AJUDA_TITULAR: Record<'nome' | 'cpfCnpj', string> = {
+  nome:
+    'Nome da pessoa física ou jurídica titular da marca. Aceita os operadores booleanos AND, OR e NOT, além do coringa "*". Exemplos: "União AND Mercantil", "Mercant*".',
+  cpfCnpj:
+    'CNPJ da pessoa jurídica ou CPF da pessoa física titular da marca. Pessoa física pode requerer o registro de marca desde que comprove, por documento do órgão competente, a atividade exercida. Exemplo: "61095048000115".',
+};
+
+// Círculo com "?" ao lado do rótulo de um campo — mostra a explicação em um
+// balão ao passar o mouse ou focar via teclado (acessível sem JS extra).
+function InfoTooltip({ texto }: { texto: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        tabIndex={0}
+        role="img"
+        aria-label={texto}
+        className="inline-flex h-4 w-4 shrink-0 cursor-help select-none items-center justify-center rounded-full border border-black/30 text-[10px] font-semibold leading-none opacity-60 hover:opacity-100 focus:opacity-100 focus:outline-none dark:border-white/40"
+      >
+        ?
+      </span>
+      <span
+        className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 w-64 -translate-x-1/2 rounded border border-black/10 bg-background p-2 text-xs font-normal normal-case leading-snug text-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-white/15"
+      >
+        {texto}
+      </span>
+    </span>
+  );
+}
+
 type Aba = 'basica' | 'marca' | 'titular';
 type TipoBusca = 'radical' | 'exata' | 'processo' | 'titular';
 
@@ -327,21 +377,40 @@ export default function BuscaMarcaPage() {
 
       <form onSubmit={buscar} className="mb-6 flex flex-wrap items-end gap-3 text-sm">
         {aba === 'basica' && (
-          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-            {CAMPOS_BASICA.map(([campo, rotulo]) => (
-              <label key={campo} className="block">
-                <span className="mb-1 block opacity-70">{rotulo}</span>
-                <input
-                  value={valoresBasica[campo]}
-                  onChange={(e) => alterarCampoBasica(campo, e.target.value)}
-                  placeholder="só dígitos"
-                  minLength={2}
-                  disabled={buscando || (campoBasicaAtivo !== undefined && campoBasicaAtivo !== campo)}
-                  title="Preencha apenas um destes 4 campos por busca"
-                  className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 disabled:opacity-40 dark:border-white/20"
-                />
-              </label>
+          <div className="w-full max-w-md">
+            {CAMPOS_BASICA.map(([campo, rotulo], indice) => (
+              <div key={campo}>
+                {indice > 0 && (
+                  <div className="my-1 flex items-center gap-3 text-xs font-medium uppercase opacity-50">
+                    <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
+                    ou
+                    <span className="h-px flex-1 bg-black/10 dark:bg-white/15" />
+                  </div>
+                )}
+                <label className="block">
+                  <span className="mb-1 flex items-center gap-1.5 opacity-70">
+                    {rotulo}
+                    <InfoTooltip texto={AJUDA_BASICA[campo]} />
+                  </span>
+                  <input
+                    value={valoresBasica[campo]}
+                    onChange={(e) => alterarCampoBasica(campo, e.target.value)}
+                    placeholder="só dígitos"
+                    minLength={2}
+                    disabled={buscando || (campoBasicaAtivo !== undefined && campoBasicaAtivo !== campo)}
+                    title="Preencha apenas um destes 4 campos por busca"
+                    className="w-full rounded border border-black/20 bg-transparent px-2 py-1.5 disabled:opacity-40 dark:border-white/20"
+                  />
+                </label>
+              </div>
             ))}
+            <button
+              type="submit"
+              disabled={buscando}
+              className="mt-4 w-full rounded bg-foreground px-4 py-1.5 font-medium text-background disabled:opacity-50"
+            >
+              {buscando ? 'Consultando…' : 'Consultar INPI'}
+            </button>
           </div>
         )}
 
@@ -369,7 +438,10 @@ export default function BuscaMarcaPage() {
               </div>
             </fieldset>
             <label className="block flex-1 basis-52">
-              <span className="mb-1 block opacity-70">Marca</span>
+              <span className="mb-1 flex items-center gap-1.5 opacity-70">
+                Marca
+                <InfoTooltip texto={AJUDA_MARCA.marca} />
+              </span>
               <input
                 value={termoMarca}
                 onChange={(e) => setTermoMarca(e.target.value)}
@@ -381,7 +453,10 @@ export default function BuscaMarcaPage() {
               />
             </label>
             <label className="block w-32">
-              <span className="mb-1 block opacity-70">Classificação Nice - NCL</span>
+              <span className="mb-1 flex items-center gap-1.5 opacity-70">
+                Classificação Nice - NCL
+                <InfoTooltip texto={AJUDA_MARCA.ncl} />
+              </span>
               <input
                 value={classeNcl}
                 onChange={(e) => setClasseNcl(e.target.value)}
@@ -398,7 +473,10 @@ export default function BuscaMarcaPage() {
           <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
             {CAMPOS_TITULAR.map(([campo, rotulo]) => (
               <label key={campo} className="block">
-                <span className="mb-1 block opacity-70">{rotulo}</span>
+                <span className="mb-1 flex items-center gap-1.5 opacity-70">
+                  {rotulo}
+                  <InfoTooltip texto={AJUDA_TITULAR[campo]} />
+                </span>
                 <input
                   value={valoresTitular[campo]}
                   onChange={(e) => alterarCampoTitular(campo, e.target.value)}
@@ -413,13 +491,15 @@ export default function BuscaMarcaPage() {
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={buscando}
-          className="rounded bg-foreground px-4 py-1.5 font-medium text-background disabled:opacity-50"
-        >
-          {buscando ? 'Consultando…' : 'Consultar INPI'}
-        </button>
+        {aba !== 'basica' && (
+          <button
+            type="submit"
+            disabled={buscando}
+            className="rounded bg-foreground px-4 py-1.5 font-medium text-background disabled:opacity-50"
+          >
+            {buscando ? 'Consultando…' : 'Consultar INPI'}
+          </button>
+        )}
       </form>
 
       {erroEnvio && (
