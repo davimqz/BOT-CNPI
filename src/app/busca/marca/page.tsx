@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 // Tela de consulta manual ao pePI (Fase 2). A busca roda no GitHub Actions
@@ -112,6 +113,7 @@ interface JobStatus {
 }
 
 export default function BuscaMarcaPage() {
+  const router = useRouter();
   const [aba, setAba] = useState<Aba>('marca');
 
   // Campos independentes por aba — trocar de aba não perde o que foi digitado
@@ -680,10 +682,27 @@ export default function BuscaMarcaPage() {
                 {(resultado.itens ?? []).map((r, i) => (
                   <tr
                     key={`${r.processo}-${i}`}
-                    className="border-t border-black/5 align-top dark:border-white/10"
+                    tabIndex={r.codPedido ? 0 : undefined}
+                    onClick={() => {
+                      if (r.codPedido) {
+                        router.push(`/busca/marca/processo/${r.codPedido}?processo=${r.processo}`);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (r.codPedido && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        router.push(`/busca/marca/processo/${r.codPedido}?processo=${r.processo}`);
+                      }
+                    }}
+                    title={r.codPedido ? 'Ver detalhe do processo' : undefined}
+                    className={`border-t border-black/5 align-top dark:border-white/10 ${
+                      r.codPedido
+                        ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/10'
+                        : ''
+                    }`}
                   >
                     {porTitular && (
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selecao.has(r.processo)}
@@ -694,13 +713,7 @@ export default function BuscaMarcaPage() {
                     )}
                     <td className="px-3 py-2 font-mono">
                       {r.codPedido ? (
-                        <Link
-                          href={`/busca/marca/processo/${r.codPedido}?processo=${r.processo}`}
-                          className="underline decoration-dotted hover:opacity-70"
-                          title="Ver detalhe do processo"
-                        >
-                          {r.processo}
-                        </Link>
+                        <span className="underline decoration-dotted">{r.processo}</span>
                       ) : (
                         r.processo
                       )}
