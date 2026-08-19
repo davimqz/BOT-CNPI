@@ -276,6 +276,33 @@ model PepiSearchJob {
   @@map("pepi_search_jobs")
 }
 
+// Job de detalhe de processo pePI: a API cria a linha como `pendente` ao clicar
+// num processo do resultado da busca, dispara pepi-detalhe.yml via
+// workflow_dispatch passando CodPedido, e o worker grava o resultado; o
+// frontend faz polling (mesmo padrão de PepiSearchJob). `codPedido` é o
+// identificador de sessão que o pePI usa na URL de detalhe
+// (Action=detail&CodPedido=N) — capturado no resultado da busca por marca.
+// Sem campo de imagem do protocolo: só aparece autenticado como titular do
+// processo, fora do alcance da sessão anônima usada aqui (ver skill
+// pepi-scraping-playbook).
+model PepiDetalheJob {
+  id           String         @id @default(cuid())
+  codPedido    String         @map("cod_pedido")
+  processo     String
+  status       StatusJobBusca @default(pendente)
+  etapa        String?
+  resultado    Json?
+  erro         String?
+  criadoEm     DateTime       @default(now()) @map("criado_em")
+  finalizadoEm DateTime?      @map("finalizado_em")
+
+  @@index([status, criadoEm])
+  // Reaproveitar um job recente bem-sucedido do mesmo processo em vez de
+  // disparar um novo workflow a cada clique (rate limit contra o pePI).
+  @@index([codPedido, status, finalizadoEm])
+  @@map("pepi_detalhe_jobs")
+}
+
 // Registro de cada rodada de busca/monitoramento, para auditoria e depuração.
 model LogExecucao {
   id           String    @id @default(cuid())

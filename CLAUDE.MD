@@ -297,6 +297,7 @@ registrar qualquer número aqui.
 | `configuracoes_alerta` | Canais habilitados por usuário e parâmetros de delay/intervalo de envio. |
 | `logs_execucao` | Registro de cada rodada de busca/monitoramento, para auditoria e depuração. |
 | `pepi_search_jobs` | Job de busca ao vivo no pePI: criado `pendente` pela API, executado pelo workflow `pepi-search.yml`, consumido por polling do frontend (termo, tipo, status, etapa, resultado JSON). |
+| `pepi_detalhe_jobs` | Job de detalhe de um processo pePI (clique num processo do resultado da busca): mesmo padrão de `pepi_search_jobs`, executado pelo workflow `pepi-detalhe.yml`. A API reaproveita um job `sucesso` do mesmo `codPedido` de até 24h atrás em vez de disparar um novo workflow a cada clique. Sem imagem de protocolo no resultado — só aparece autenticado como titular, fora do alcance da sessão anônima (ver skill `pepi-scraping-playbook`). |
 
 Ao criar/alterar migrations, mantenha este quadro atualizado — ele é a referência rápida antes de abrir o schema do Prisma.
 

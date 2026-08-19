@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Pause, Pencil, Play, Trash2 } from 'lucide-react';
 import { eventoPorSlug } from '@/lib/eventos-alerta';
-import { THRESHOLD_PADRAO } from '@/lib/similaridade';
 import { FormularioMarca } from './formulario-marca';
 import type { Cliente, Marca } from './tipos';
 
@@ -15,8 +15,12 @@ import type { Cliente, Marca } from './tipos';
 // cadastrar algo novo.
 
 function resumoEventos(eventosAlerta: string[]): string {
-  if (eventosAlerta.length === 0) return 'todos';
+  if (eventosAlerta.length === 0) return 'todos os eventos';
   return eventosAlerta.map((slug) => eventoPorSlug(slug)?.rotulo ?? slug).join(', ');
+}
+
+function fmtData(iso: string): string {
+  return new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 }
 
 export default function MarcasPage() {
@@ -126,11 +130,9 @@ export default function MarcasPage() {
               <th className="px-3 py-2 font-medium">Marca</th>
               <th className="px-3 py-2 font-medium">Processo</th>
               <th className="px-3 py-2 font-medium">Classe</th>
-              <th className="px-3 py-2 font-medium">Tipo</th>
-              <th className="px-3 py-2 font-medium">Fonte</th>
-              <th className="px-3 py-2 font-medium">Cliente</th>
+              <th className="px-3 py-2 font-medium">Prioridade</th>
+              <th className="px-3 py-2 font-medium">RPI Atual</th>
               <th className="px-3 py-2 font-medium">Alertas</th>
-              <th className="px-3 py-2 font-medium">Parecidas</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Ações</th>
             </tr>
@@ -150,18 +152,12 @@ export default function MarcasPage() {
                 <td className="px-3 py-2 font-medium">{m.nome}</td>
                 <td className="px-3 py-2 font-mono">{m.processo ?? '—'}</td>
                 <td className="px-3 py-2">{m.classeNcl ?? '—'}</td>
-                <td className="px-3 py-2 capitalize">{m.tipoBusca}</td>
-                <td className="px-3 py-2">{m.fonteDados === 'rpi' ? 'RPI semanal' : 'pePI'}</td>
-                <td className="px-3 py-2">{m.cliente?.nome ?? '—'}</td>
-                <td className="max-w-56 px-3 py-2" title={resumoEventos(m.eventosAlerta)}>
-                  {m.eventosAlerta.length === 0 ? (
-                    'todos os eventos'
-                  ) : (
-                    <span className="line-clamp-2">{resumoEventos(m.eventosAlerta)}</span>
-                  )}
-                </td>
                 <td className="whitespace-nowrap px-3 py-2">
-                  {m.similaridadeAtiva ? `≥ ${m.similaridadeThreshold ?? THRESHOLD_PADRAO}%` : '—'}
+                  {m.prioridade ? fmtData(m.prioridade) : '—'}
+                </td>
+                <td className="px-3 py-2">{m.rpiAtual ?? '—'}</td>
+                <td className="px-3 py-2 text-center" title={resumoEventos(m.eventosAlerta)}>
+                  {m.eventosAlerta.length === 0 ? 'Todos' : m.eventosAlerta.length}
                 </td>
                 <td className="px-3 py-2">
                   <span
@@ -175,40 +171,48 @@ export default function MarcasPage() {
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditandoId(m.id);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className="underline opacity-80 hover:opacity-100"
-                  >
-                    editar
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      alternarAtiva(m);
-                    }}
-                    className="ml-3 underline opacity-80 hover:opacity-100"
-                  >
-                    {m.ativa ? 'desativar' : 'reativar'}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      excluir(m);
-                    }}
-                    className="ml-3 text-red-600 underline opacity-80 hover:opacity-100 dark:text-red-400"
-                  >
-                    excluir
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditandoId(m.id);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      title="Editar"
+                      aria-label="Editar"
+                      className="opacity-70 hover:opacity-100"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        alternarAtiva(m);
+                      }}
+                      title={m.ativa ? 'Desativar' : 'Reativar'}
+                      aria-label={m.ativa ? 'Desativar' : 'Reativar'}
+                      className="opacity-70 hover:opacity-100"
+                    >
+                      {m.ativa ? <Pause size={16} /> : <Play size={16} />}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        excluir(m);
+                      }}
+                      title="Excluir"
+                      aria-label="Excluir"
+                      className="text-red-600 opacity-70 hover:opacity-100 dark:text-red-400"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
             {!carregando && marcas.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center opacity-60">
+                <td colSpan={8} className="px-3 py-8 text-center opacity-60">
                   Nenhuma marca cadastrada ainda —{' '}
                   <Link href="/marcas/cadastrar" className="underline">
                     cadastre a primeira

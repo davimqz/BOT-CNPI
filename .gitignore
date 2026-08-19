@@ -43,3 +43,6 @@ next-env.d.ts
 
 # prisma — client gerado por `prisma generate` (roda no postinstall)
 /src/generated/
+
+# saída de sessões exploratórias do pePI (HTML/PNG/JSON de scripts explore*.ts) — scratch, não produto
+/pepi-out*/

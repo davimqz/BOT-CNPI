@@ -692,7 +692,19 @@ export default function BuscaMarcaPage() {
                         />
                       </td>
                     )}
-                    <td className="px-3 py-2 font-mono">{r.processo}</td>
+                    <td className="px-3 py-2 font-mono">
+                      {r.codPedido ? (
+                        <Link
+                          href={`/busca/marca/processo/${r.codPedido}?processo=${r.processo}`}
+                          className="underline decoration-dotted hover:opacity-70"
+                          title="Ver detalhe do processo"
+                        >
+                          {r.processo}
+                        </Link>
+                      ) : (
+                        r.processo
+                      )}
+                    </td>
                     <td className="px-3 py-2">{r.marca ?? '—'}</td>
                     <td className="px-3 py-2">{r.situacao ?? '—'}</td>
                     <td className="max-w-64 truncate px-3 py-2" title={r.titular ?? undefined}>

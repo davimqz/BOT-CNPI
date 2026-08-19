@@ -78,6 +78,22 @@ export const PEPI = {
     textoNenhumTitular: 'text=Nenhum Nome de Titular foi encontrado',
   },
 
+  /**
+   * Página de detalhe de um processo — confirmada ao vivo em 17/08/2026
+   * (processo 944289240, CodPedido 6744172; ver explore-detalhe.ts). Gotcha
+   * confirmado: navegar direto para Action=detail&CodPedido=N SEM antes
+   * buscar não funciona — o CodPedido só é reconhecido dentro da MESMA
+   * sessão que fez a busca (estado de sessão, igual à paginação de
+   * resultados.linkPagina); é preciso buscar por processo e clicar no link
+   * de detalhe do próprio resultado (resultados.linkDetalhe). Campos são
+   * extraídos majoritariamente por texto de rótulo visível (tabelas sem
+   * classe/id estável), não por CSS posicional — só `#numeroProcesso` é um
+   * seletor direto confiável.
+   */
+  detalheProcesso: {
+    campoNumeroProcesso: 'input#numeroProcesso',
+  },
+
   resultados: {
     /**
      * A página de resultado tem 3 <table>; a de dados é a que contém o header

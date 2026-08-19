@@ -68,9 +68,50 @@ A busca sob demanda responde "como está agora"; o monitoramento precisa respond
 - **Uma consulta pode levar minutos**: o teto de marcas por rodada não basta para a rodada terminar; use também um orçamento de tempo, processando da marca mais desatualizada para a mais recente, para a fila girar entre os dias em vez de a rodada morrer no timeout do runner.
 - O despacho gerado usa o código sintético `PEPI-SITUACAO` (`src/lib/verificacao.ts`), que **não existe na tabela de códigos do INPI** — isso é de propósito: mantém esses registros fora do cálculo de prazos legais (Fase 5), que só pode se basear em código oficial confirmado.
 
+### Detalhe de processo (clique num processo do resultado da busca) — confirmado ao vivo em 17/08/2026
+
+`src/workers/pepi/detalhe.ts` abre a página `Action=detail&CodPedido=N` e extrai todos os campos
+("Processo → Marca → Situação → Apresentação → Natureza", Classificação NCL, Classificação de
+Viena, Titulares, Representante Legal, Datas, Petições, Publicações). Dois gotchas que não são
+óbvios até bater a cabeça neles:
+
+- **CodPedido é estado de SESSÃO, não um identificador estável**: navegar direto para
+  `Action=detail&CodPedido=N` sem antes ter feito uma busca NA MESMA sessão devolve uma página sem
+  `#numeroProcesso` (como se o CodPedido não existisse) — mesma categoria de armadilha que a
+  paginação de resultados (`resultados.linkPagina`). Por isso `buscarDetalhe()` sempre refaz a busca
+  por número de processo e clica no link de detalhe do próprio resultado, em vez de montar a URL
+  direto — não tente "otimizar" isso pulando a busca.
+- **A coluna "Img" da tabela de Petições (ícone do protocolo digitalizado) só aparece autenticado
+  como TITULAR do processo** — confirmado comparando a mesma petição (processo 944289240, protocolo
+  850260324336) ao vivo: a sessão anônima ("Continuar....") devolve `-` na célula, sem link nem
+  `<img>`, enquanto a tela logada como titular (com "Meus Pedidos" no canto) mostra um ícone de PDF
+  clicável. Reproduzir isso exigiria autenticação pessoal real no INPI (gov.br, provável 2FA) — fora
+  do modelo de sessão anônima deste playbook inteiro. **Decisão registrada**: não implementado; o
+  scraper de detalhe nem tenta capturar essa célula, e a tela de detalhe (`/busca/marca/processo/
+  [codPedido]`) simplesmente não tem coluna Img. Não reabrir sem decidir antes se vale a pena a
+  automação de login pessoal (credencial sensível, sessão mais frágil, sem o reset automático que o
+  GitHub Actions dá de graça — mesma classe de trade-off da Seção 3.1.2 do CLAUDE.md).
+- **Gotcha de implementação, não de site**: qualquer função nomeada (`function f(){}` ou
+  `const f = () => {}`) declarada DENTRO de um `page.evaluate(...)` quebra com
+  `ReferenceError: __name is not defined` quando o worker roda via `tsx` — o compilador (esbuild)
+  usado pelo `tsx` tem `keepNames: true` fixo (não dá pra desligar por config de projeto), e o
+  helper `__name` que ele injeta só existe no bundle Node, não no contexto isolado do navegador para
+  onde o Playwright serializa a função. Só callbacks 100% anônimos (passados direto pra `.map`/
+  `.find`/`.filter`, nunca atribuídos a um nome) são seguros dentro de `evaluate()` — é por isso que
+  `extrairResultadosDaPagina` (`search.ts`) e `detalhe.ts` inteiro evitam funções auxiliares
+  nomeadas ali dentro, mesmo à custa de mais repetição.
+- **`table.querySelectorAll('tbody tr')`/`tr.querySelectorAll('td')` capturam linhas/células de
+  tabelas ANINHADAS** (os balões de detalhe escondidos, tipo `onmouseover="showMe('389')"`, têm sua
+  própria `<table><tr><td>` dentro da célula) — contaminou a extração de Petições/Classificações
+  até isso ser corrigido. Use as propriedades nativas `HTMLTableElement.rows` e
+  `HTMLTableRowElement.cells` (como `search.ts` já fazia em `extrairResultadosDaPagina`) em vez de
+  `querySelectorAll`: elas só enxergam as linhas/células da PRÓPRIA tabela/linha, nunca de uma
+  tabela aninhada.
+
 ## Funcionalidades que dependem deste playbook
 
 - Consulta instantânea por nome/processo (Radical/Exata, com filtro de classe NCL)
+- Detalhe completo de um processo (clique no nº do processo no resultado da busca)
 - Geração do relatório "Consultor de Marca" a partir do resultado ao vivo
 - Busca por depositante/titular (nome/razão social ou CPF/CNPJ), incluindo paginação multi-página
 - Monitoramento configurado para "com scraping no site" (em vez de "apenas Revista RPI")

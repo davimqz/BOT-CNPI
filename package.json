@@ -12,12 +12,14 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "ingest:rpi": "tsx src/workers/rpi/ingest.ts",
     "search:pepi": "tsx src/workers/pepi/search.ts",
+    "detalhe:pepi": "tsx src/workers/pepi/detalhe.ts",
     "monitor:pepi": "tsx src/workers/pepi/monitor.ts",
     "resumo:prazos": "tsx src/workers/prazos/resumo.ts",
     "alertas:enviar": "tsx src/workers/alertas/enviar.ts",
     "email:teste": "tsx src/workers/email/teste.ts",
     "sanity:pepi": "tsx src/workers/pepi/sanity.ts",
-    "falha:pepi": "tsx src/workers/pepi/marcar-falha.ts"
+    "falha:pepi": "tsx src/workers/pepi/marcar-falha.ts",
+    "falha:pepi-detalhe": "tsx src/workers/pepi/marcar-falha-detalhe.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

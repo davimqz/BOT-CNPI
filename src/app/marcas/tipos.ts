@@ -19,4 +19,8 @@ export interface Marca {
   ativa: boolean;
   similaridadeAtiva: boolean;
   similaridadeThreshold: number | null;
+  /** Data de publicação do pedido (despacho IPAS009/IPAS756) — null se ainda não capturada. */
+  prioridade: string | null;
+  /** Número da edição da RPI da última movimentação capturada — null se nenhuma ainda. */
+  rpiAtual: number | null;
 }
