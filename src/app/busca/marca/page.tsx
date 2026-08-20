@@ -15,11 +15,15 @@ import { useEffect, useRef, useState } from 'react';
 // seus próprios campos, para não misturar estado entre buscas de tipos
 // diferentes. O dropdown "Nº de Processos por página" (20-100) que existe
 // nas telas reais foi omitido de propósito: o worker sempre pede 100/página
-// e agrega todas as páginas antes de exibir (ver search.ts) — não há
-// paginação de tela aqui, então o controle não teria efeito nenhum.
+// ao pePI e agrega todas as páginas antes de exibir (ver search.ts) — a
+// paginação de 50 em 50 abaixo é só de tela, sobre o array já completo.
 
 const POLL_MS = 3000;
 const TIMEOUT_MS = 8 * 60 * 1000;
+// Paginação é só de tela: o worker já agrega todas as páginas do pePI antes
+// de exibir (ver search.ts) — aqui apenas fatiamos o array em blocos de 50
+// pra tabela não ficar gigante quando o resultado tem centenas de processos.
+const ITENS_POR_PAGINA = 50;
 
 // Explicações de cada campo, no mesmo texto das telas reais do pePI — exibidas
 // no ícone de ajuda ao lado do rótulo (ver InfoTooltip), para o usuário não
@@ -112,6 +116,21 @@ interface JobStatus {
   erro: string | null;
 }
 
+// Números de página exibidos no paginador: sempre 1 e a última, mais uma
+// janela em volta da página atual — com "…" nos buracos, para não listar
+// centenas de botões quando o resultado tem muitas páginas.
+function numerosPagina(atual: number, total: number): (number | '…')[] {
+  const paginas = Array.from(new Set([1, total, atual - 1, atual, atual + 1]))
+    .filter((n) => n >= 1 && n <= total)
+    .sort((a, b) => a - b);
+  const comSeparadores: (number | '…')[] = [];
+  paginas.forEach((n, i) => {
+    if (i > 0 && n - paginas[i - 1] > 1) comSeparadores.push('…');
+    comSeparadores.push(n);
+  });
+  return comSeparadores;
+}
+
 export default function BuscaMarcaPage() {
   const router = useRouter();
   const [aba, setAba] = useState<Aba>('marca');
@@ -177,6 +196,10 @@ export default function BuscaMarcaPage() {
   const [segundos, setSegundos] = useState(0);
   const cancelado = useRef(false);
 
+  // Página atual da tabela de resultados (client-side) — volta pra 1 a cada
+  // nova busca disparada em iniciarBusca().
+  const [paginaAtual, setPaginaAtual] = useState(1);
+
   // Seleção em lote da busca por titular (Fase 3): quais processos do resultado
   // estão marcados e quais já constam no monitor (processo → ativa).
   const [selecao, setSelecao] = useState<Set<string>>(new Set());
@@ -221,6 +244,7 @@ export default function BuscaMarcaPage() {
     setMonitoradas(new Map());
     setLoteMsg(null);
     setLoteErro(null);
+    setPaginaAtual(1);
     setBuscaAtual({ tipo, termo: termoBusca });
     cancelado.current = false;
 
@@ -344,6 +368,12 @@ export default function BuscaMarcaPage() {
   }
 
   const resultado = job?.status === 'sucesso' ? job.resultado : null;
+  const itensResultado = resultado?.itens ?? [];
+  const totalPaginas = Math.max(1, Math.ceil(itensResultado.length / ITENS_POR_PAGINA));
+  const itensPagina = itensResultado.slice(
+    (paginaAtual - 1) * ITENS_POR_PAGINA,
+    paginaAtual * ITENS_POR_PAGINA,
+  );
 
   return (
     <div className="mx-auto w-full max-w-6xl flex-1 p-6">
@@ -654,16 +684,11 @@ export default function BuscaMarcaPage() {
                     <th className="w-8 px-3 py-2">
                       <input
                         type="checkbox"
-                        title="Selecionar todos"
-                        checked={
-                          (resultado.itens ?? []).length > 0 &&
-                          selecao.size === (resultado.itens ?? []).length
-                        }
+                        title="Selecionar todos os resultados (todas as páginas)"
+                        checked={itensResultado.length > 0 && selecao.size === itensResultado.length}
                         onChange={(e) =>
                           setSelecao(
-                            e.target.checked
-                              ? new Set((resultado.itens ?? []).map((i) => i.processo))
-                              : new Set(),
+                            e.target.checked ? new Set(itensResultado.map((i) => i.processo)) : new Set(),
                           )
                         }
                       />
@@ -679,7 +704,7 @@ export default function BuscaMarcaPage() {
                 </tr>
               </thead>
               <tbody>
-                {(resultado.itens ?? []).map((r, i) => (
+                {itensPagina.map((r, i) => (
                   <tr
                     key={`${r.processo}-${i}`}
                     tabIndex={r.codPedido ? 0 : undefined}
@@ -740,7 +765,7 @@ export default function BuscaMarcaPage() {
                     )}
                   </tr>
                 ))}
-                {(resultado.itens ?? []).length === 0 && (
+                {itensResultado.length === 0 && (
                   <tr>
                     <td colSpan={porTitular ? 8 : 6} className="px-3 py-8 text-center opacity-60">
                       {porProcesso
@@ -754,6 +779,56 @@ export default function BuscaMarcaPage() {
               </tbody>
             </table>
           </div>
+          {itensResultado.length > ITENS_POR_PAGINA && (
+            <nav
+              className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm"
+              aria-label="Paginação de resultados"
+            >
+              <p className="opacity-70">
+                Página {paginaAtual} de {totalPaginas} — {itensPagina.length} de{' '}
+                {itensResultado.length.toLocaleString('pt-BR')} resultado(s) nesta página
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}
+                  disabled={paginaAtual === 1}
+                  className="rounded border border-black/20 px-2 py-1 disabled:opacity-40 dark:border-white/20"
+                >
+                  ← Anterior
+                </button>
+                {numerosPagina(paginaAtual, totalPaginas).map((n, i) =>
+                  n === '…' ? (
+                    <span key={`ellipsis-${i}`} className="px-1.5 opacity-50">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setPaginaAtual(n)}
+                      aria-current={n === paginaAtual ? 'page' : undefined}
+                      className={`min-w-8 rounded px-2 py-1 ${
+                        n === paginaAtual
+                          ? 'bg-foreground font-medium text-background'
+                          : 'border border-black/20 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaAtual === totalPaginas}
+                  className="rounded border border-black/20 px-2 py-1 disabled:opacity-40 dark:border-white/20"
+                >
+                  Próxima →
+                </button>
+              </div>
+            </nav>
+          )}
         </>
       )}
     </div>
