@@ -37,17 +37,59 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # node_modules só muda quando package-lock.json muda — cachear evita
+      # reinstalar 750+ pacotes (~20-25s) a cada busca sob demanda.
+      - name: Cache de node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Instalar dependências
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # `npm ci` roda `prisma generate` no postinstall, mas node_modules cacheado
+      # não carrega `src/generated/prisma` (fica fora de node_modules e é
+      # gitignored) — regenerar aqui é rápido (~200ms) e evita pular esse passo
+      # quando o cache acima bate.
+      - name: Gerar cliente Prisma (cache de node_modules já quente)
+        if: steps.cache-node-modules.outputs.cache-hit == 'true'
+        run: npx prisma generate
+
+      # TENTATIVA DESCARTADA em 16/08/2026: usar o container oficial
+      # mcr.microsoft.com/playwright:vX-jammy (que já vem com Chromium + deps
+      # de SO prontos, sem precisar de install-deps) parecia eliminar esta
+      # etapa de vez. Na prática PIOROU (1m7s-2m8s vs 1m2s): runners hospedados
+      # do GitHub não retêm camadas de imagem Docker entre execuções — cada
+      # job tinha que baixar a imagem (~1,5GB+) do zero, o que custou mais do
+      # que o `install-deps` via apt que ela substituía. Medido ao vivo,
+      # não hipotético — não reintroduzir sem confirmar que esse comportamento
+      # de cache de imagem mudou.
+      - name: Cache do navegador Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Instalar navegador do Playwright
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
 
-      # Falha alto se o pePI mudou de layout — nunca confiar em resultados de
-      # uma estrutura de página não reconhecida (skill pepi-scraping-playbook).
-      - name: Sanidade do pePI (estrutura da página)
-        run: npm run sanity:pepi
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Instalar dependências de SO do Playwright (cache do navegador já quente)
+        if: steps.cache-playwright.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # A sanidade (npm run sanity:pepi) NÃO roda mais aqui em toda busca — ela
+      # abria uma sessão completa de login+query só para validar layout, dobrando
+      # o tempo de cada busca sob demanda. Ela roda 1x/dia no pepi-monitor.yml.
+      # Trade-off consciente: se o pePI mudar de layout entre uma rodada diária
+      # e outra, uma busca sob demanda nessa janela pode não ser pega pela
+      # sanidade — mas `search.ts` já lança SiteMudouError inline quando um
+      # formulário/elemento esperado não é encontrado, então não fica cego.
+      # Ver skill pepi-scraping-playbook.
 
       - name: Buscar no pePI
         run: npm run search:pepi

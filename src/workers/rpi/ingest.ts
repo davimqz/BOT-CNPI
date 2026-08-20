@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/db';
 import type { Cruzamento, DespachoParaCruzamento } from '@/lib/verificacao';
-import { cruzarDespachos, motivoDoVinculo } from '@/lib/verificacao';
+import { casaComMarca, casaPorSimilaridade, cruzarDespachos, motivoDoVinculo } from '@/lib/verificacao';
 import { prazosDoDespacho, statusPorData } from '@/lib/prazos';
 import { PRIMEIRA_EDICAO_MONITORADA, edicoesFaltantes } from '@/lib/revistas';
 import { baixarEdicao } from './download';
@@ -201,21 +201,39 @@ async function cruzarComMonitoradas(
   });
   const cruzamentos = cruzarDespachos(marcas, despachos);
 
-  // Um UPDATE por combinação (marca, gera alerta ou não), em lotes — evita um
-  // round-trip por despacho quando uma marca movimenta muito numa edição só.
-  const grupos = new Map<string, string[]>();
+  // Um UPDATE por combinação (marca, alerta, motivo, score), em lotes — evita
+  // um round-trip por despacho quando uma marca movimenta muito numa edição
+  // só. O score só varia dentro de `similaridade` (processo/nome nunca têm
+  // score), então o casamento exato — a grande maioria — continua batendo
+  // num grupo só por marca.
+  const grupos = new Map<
+    string,
+    { ids: string[]; marcaId: string; alerta: boolean; motivo: Cruzamento['motivo']; score: number | null }
+  >();
   for (const c of cruzamentos) {
-    const chave = `${c.marcaId}|${c.alerta}`;
-    const lista = grupos.get(chave);
-    if (lista) lista.push(c.despachoId);
-    else grupos.set(chave, [c.despachoId]);
+    const chave = `${c.marcaId}|${c.alerta}|${c.motivo}|${c.score ?? ''}`;
+    const grupo = grupos.get(chave);
+    if (grupo) grupo.ids.push(c.despachoId);
+    else {
+      grupos.set(chave, {
+        ids: [c.despachoId],
+        marcaId: c.marcaId,
+        alerta: c.alerta,
+        motivo: c.motivo,
+        score: c.score ?? null,
+      });
+    }
   }
-  for (const [chave, ids] of grupos) {
-    const [marcaId, alerta] = chave.split('|');
-    for (let i = 0; i < ids.length; i += LOTE_UPDATE) {
+  for (const g of grupos.values()) {
+    for (let i = 0; i < g.ids.length; i += LOTE_UPDATE) {
       await prisma.despacho.updateMany({
-        where: { id: { in: ids.slice(i, i + LOTE_UPDATE) } },
-        data: { marcaId, alertaPendente: alerta === 'true' },
+        where: { id: { in: g.ids.slice(i, i + LOTE_UPDATE) } },
+        data: {
+          marcaId: g.marcaId,
+          alertaPendente: g.alerta,
+          motivoVinculo: g.motivo,
+          similaridadeScore: g.score,
+        },
       });
     }
   }
@@ -290,6 +308,8 @@ async function ingerirEdicaoEnxuta(
       edicaoRpiId: edicaoId,
       marcaId: c.marcaId,
       alertaPendente: c.alerta,
+      motivoVinculo: c.motivo,
+      similaridadeScore: c.score ?? null,
       processo: d.processo,
       codigo: d.codigo,
       textoDespacho: d.nomeDespacho || null,
@@ -424,6 +444,71 @@ async function recruzarEdicoes(quantidade: number): Promise<void> {
 }
 
 /**
+ * Backfill de motivo/score: `npm run ingest:rpi -- --recalcular-motivo`.
+ *
+ * `motivoVinculo`/`similaridadeScore` (16/08/2026) não existiam antes desta
+ * coluna — despacho vinculado antes dela tem os dois campos nulos, e a tela
+ * de Colidências (/marcas/colidencias) não os enxerga. Este modo percorre
+ * TODO despacho já vinculado sem motivo gravado (não só as últimas N edições:
+ * uma colidência antiga não é menos colidência) e recalcula pelo mesmo
+ * critério do cruzamento — casamento exato primeiro, senão só pode ter vindo
+ * de similaridade, cujo score é recomputado contra o threshold da marca.
+ *
+ * Marca apagada depois do vínculo (ou já sem similaridade ativa) não impede o
+ * motivo exato de ser gravado; só o score de uma colidência fica de fora
+ * nesse caso raro, porque não há mais threshold para recalcular contra.
+ */
+async function recalcularMotivoRetroativo(): Promise<void> {
+  const marcas = await prisma.marcaMonitorada.findMany({
+    select: {
+      id: true,
+      nome: true,
+      processo: true,
+      classeNcl: true,
+      eventosAlerta: true,
+      similaridadeAtiva: true,
+      similaridadeThreshold: true,
+    },
+  });
+  const porMarcaId = new Map(marcas.map((m) => [m.id, m]));
+
+  const despachos = await prisma.despacho.findMany({
+    where: { marcaId: { not: null }, motivoVinculo: null },
+    select: { id: true, processo: true, nomeMarca: true, classeNcl: true, codigo: true, marcaId: true },
+  });
+  if (despachos.length === 0) {
+    console.log('[rpi] nenhum despacho vinculado sem motivo registrado — nada a recalcular.');
+    return;
+  }
+  console.log(`[rpi] ${despachos.length} despacho(s) vinculado(s) sem motivo registrado — recalculando.`);
+
+  let processo = 0;
+  let nome = 0;
+  let similaridade = 0;
+  for (const d of despachos) {
+    const marca = porMarcaId.get(d.marcaId!);
+    if (!marca) continue; // marca removida depois do vínculo: nada a recalcular.
+    if (casaComMarca(marca, d)) {
+      const motivo = marca.processo ? 'processo' : 'nome';
+      await prisma.despacho.update({ where: { id: d.id }, data: { motivoVinculo: motivo } });
+      if (motivo === 'processo') processo++;
+      else nome++;
+    } else {
+      const r = casaPorSimilaridade(marca, d);
+      await prisma.despacho.update({
+        where: { id: d.id },
+        data: { motivoVinculo: 'similaridade', similaridadeScore: r.casa ? r.score : null },
+      });
+      similaridade++;
+    }
+  }
+  console.log(
+    `[rpi] recálculo concluído: ${processo} por processo, ${nome} por nome, ${similaridade} por ` +
+      'similaridade (colidência) — ver tela /marcas/colidencias.',
+  );
+}
+
+/**
  * Backfill de prazos: `npm run ingest:rpi -- --gerar-prazos[=N]`.
  *
  * O cruzamento só olha despacho AINDA SEM MARCA, então despacho vinculado antes
@@ -467,12 +552,15 @@ async function gerarPrazosRetroativo(quantidade: number): Promise<void> {
         classeNcl: true,
         codigo: true,
         marcaId: true,
+        motivoVinculo: true,
       },
     });
     if (despachos.length === 0) continue;
 
-    // Reconstrói o motivo de cada vínculo: sem ele, uma colidência viraria prazo
-    // de pagamento/recurso de um processo que não é do usuário.
+    // Usa o motivo já persistido quando existir; despacho vinculado antes da
+    // coluna existir (motivoVinculo nulo) cai no recálculo de sempre. Sem
+    // algum motivo, uma colidência viraria prazo de pagamento/recurso de um
+    // processo que não é do usuário.
     const cruzamentos: Cruzamento[] = [];
     for (const d of despachos) {
       const marca = porMarcaId.get(d.marcaId!);
@@ -481,7 +569,7 @@ async function gerarPrazosRetroativo(quantidade: number): Promise<void> {
         despachoId: d.id,
         marcaId: marca.id,
         alerta: false, // irrelevante aqui: este modo não mexe na fila de alertas.
-        motivo: motivoDoVinculo(marca, d),
+        motivo: d.motivoVinculo ?? motivoDoVinculo(marca, d),
       });
     }
 
@@ -723,6 +811,15 @@ async function main() {
   if (flagPrazos) {
     try {
       await gerarPrazosRetroativo(Number(flagPrazos.split('=')[1]) || 4);
+    } finally {
+      await prisma.$disconnect();
+    }
+    return;
+  }
+
+  if (process.argv.includes('--recalcular-motivo')) {
+    try {
+      await recalcularMotivoRetroativo();
     } finally {
       await prisma.$disconnect();
     }

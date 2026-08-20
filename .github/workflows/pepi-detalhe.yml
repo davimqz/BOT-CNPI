@@ -1,0 +1,79 @@
+# Detalhe de processo pePI sob demanda (ver CLAUDE.md Seção 3.1 e skill pepi-scraping-playbook).
+# Disparado pela API do Next.js via workflow_dispatch quando o usuário clica num processo do
+# resultado da busca; o resultado é gravado no Postgres associado ao job_id, e o frontend faz
+# polling até aparecer. Espelha a estrutura de pepi-search.yml — mesmos passos de cache/instalação.
+name: Detalhe de Processo pePI
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'ID do job de detalhe criado pela API (linha em pepi_detalhe_jobs)'
+        required: true
+        type: string
+      cod_pedido:
+        description: 'CodPedido do processo no pePI (Action=detail&CodPedido=N)'
+        required: true
+        type: string
+      processo:
+        description: 'Número do processo (só para o job guardar/exibir)'
+        required: true
+        type: string
+
+jobs:
+  detalhe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache de node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Instalar dependências
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Gerar cliente Prisma (cache de node_modules já quente)
+        if: steps.cache-node-modules.outputs.cache-hit == 'true'
+        run: npx prisma generate
+
+      - name: Cache do navegador Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Instalar navegador do Playwright
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Instalar dependências de SO do Playwright (cache do navegador já quente)
+        if: steps.cache-playwright.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Buscar detalhe do processo no pePI
+        run: npm run detalhe:pepi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JOB_ID: ${{ inputs.job_id }}
+          COD_PEDIDO: ${{ inputs.cod_pedido }}
+          PROCESSO: ${{ inputs.processo }}
+
+      # Rede de segurança do polling da tela — ver comentário equivalente em pepi-search.yml.
+      - name: Marcar o job como falho
+        if: failure() || cancelled()
+        run: npm run falha:pepi-detalhe
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JOB_ID: ${{ inputs.job_id }}

@@ -19,7 +19,7 @@
  * dispara um novo job com o nome exato, que aí abre os processos direto.
  */
 import 'dotenv/config';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Browser, type Page } from 'playwright';
 import { prisma } from '@/lib/db';
 import { interpretarTermoTitular, nomeTitularConfere } from '@/lib/busca-titular';
 import { PEPI } from './selectors';
@@ -52,7 +52,7 @@ export interface ResultadoPepi {
   codPedido: string | null;
 }
 
-class SiteMudouError extends Error {
+export class SiteMudouError extends Error {
   constructor(etapa: string, detalhe: string) {
     super(
       `Estrutura esperada não encontrada em "${etapa}": ${detalhe}. ` +
@@ -60,6 +60,39 @@ class SiteMudouError extends Error {
     );
     this.name = 'SiteMudouError';
   }
+}
+
+/**
+ * Login anônimo compartilhado por qualquer worker que precise de uma sessão no
+ * pePI (busca e detalhe de processo) — ver skill pepi-scraping-playbook: o
+ * link "Continuar...." abre uma ABA NOVA (target="_blank"), e a navegação
+ * seguinte precisa continuar NELA, senão a sessão não está autenticada e todo
+ * JSP devolve a tela de login. Centralizado aqui para uma mudança desse fluxo
+ * no site exigir editar um lugar só.
+ */
+export async function abrirSessaoAnonima(browser: Browser): Promise<Page> {
+  const ctx = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  });
+  let page = await ctx.newPage();
+  page.setDefaultTimeout(30_000);
+
+  await page.goto(`${PEPI.baseUrl}${PEPI.entrada.url}`, { waitUntil: 'domcontentloaded' });
+  const linkAnonimo = page.locator(PEPI.entrada.linkAcessoAnonimo);
+  if ((await linkAnonimo.count()) === 0) {
+    throw new SiteMudouError('acessando site', 'link de acesso anônimo ("Continuar....") ausente');
+  }
+  const [abaLogin] = await Promise.all([
+    ctx.waitForEvent('page', { timeout: 15_000 }).catch(() => null),
+    linkAnonimo.first().click(),
+  ]);
+  if (abaLogin) {
+    page = abaLogin;
+    page.setDefaultTimeout(30_000);
+  }
+  await page.waitForLoadState('domcontentloaded');
+  return page;
 }
 
 async function extrairResultadosDaPagina(page: Page): Promise<ResultadoPepi[]> {
@@ -219,31 +252,8 @@ export async function buscar(
 ): Promise<BuscaPepiResultado> {
   const browser = await chromium.launch({ headless: true });
   try {
-    const ctx = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    });
-    let page = await ctx.newPage();
-    page.setDefaultTimeout(30_000);
-
     await aoMudarEtapa('acessando site do INPI');
-    await page.goto(`${PEPI.baseUrl}${PEPI.entrada.url}`, { waitUntil: 'domcontentloaded' });
-    const linkAnonimo = page.locator(PEPI.entrada.linkAcessoAnonimo);
-    if ((await linkAnonimo.count()) === 0) {
-      throw new SiteMudouError('acessando site', 'link de acesso anônimo ("Continuar....") ausente');
-    }
-    // O link tem target="_blank": o login anônimo acontece numa ABA NOVA (mesmos
-    // cookies de sessão). Sem esperar essa aba carregar, a sessão ainda não está
-    // autenticada e qualquer JSP devolve a tela de login (visto em 28/07/2026).
-    const [abaLogin] = await Promise.all([
-      ctx.waitForEvent('page', { timeout: 15_000 }).catch(() => null),
-      linkAnonimo.first().click(),
-    ]);
-    if (abaLogin) {
-      page = abaLogin;
-      page.setDefaultTimeout(30_000);
-    }
-    await page.waitForLoadState('domcontentloaded');
+    const page = await abrirSessaoAnonima(browser);
 
     await aoMudarEtapa('preenchendo busca');
     if (tipo === 'titular') {

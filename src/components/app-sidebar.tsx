@@ -20,11 +20,13 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar';
 import {
+  IconeAcompanhar,
   IconeAlertas,
+  IconeCadastrar,
+  IconeCaixaMensagem,
   IconeColidencia,
   IconeConsulta,
   IconeDesenhoIndustrial,
-  IconeHistorico,
   IconeMarcas,
   IconePatentes,
   IconePrazos,
@@ -51,31 +53,50 @@ interface GrupoPI {
  * Um dropdown por tipo de propriedade industrial (Marcas hoje; Patentes e
  * Desenho Industrial entram como irmãos no mesmo nível quando forem
  * implementados, não aninhados dentro de Marcas — cada um terá seu próprio
- * modelo de despacho). Revistas e Prazos ficam FORA desses dropdowns porque já
- * são compartilhados entre os três tipos (mesma edição da RPI, mesmo motor de
- * prazo) — ver CLAUDE.md Seção 3.1.1.
+ * modelo de despacho). "Consulta Prévia de Viabilidade" é transversal aos três
+ * tipos (é pesquisa ao vivo antes de decidir depositar, não acompanhamento de
+ * um processo já existente), por isso fica como grupo irmão, não dentro de
+ * Marcas. Revistas, Prazos e Caixa de Mensagem ficam FORA desses dropdowns
+ * porque já são compartilhados entre os três tipos (mesma edição da RPI,
+ * mesmo motor de prazo) — ver CLAUDE.md Seção 3.1.1.
+ *
+ * "Histórico RPI" (/historico) segue existindo como rota, só não tem mais
+ * entrada de navegação — pedido explícito do usuário em 16/08/2026.
  */
 const GRUPOS_PI: GrupoPI[] = [
+  {
+    titulo: 'Consulta Prévia de Viabilidade',
+    Icone: IconeConsulta,
+    itens: [
+      { href: '/busca', nome: 'Pesquisa da Propriedade Industrial (pePI)', Icone: IconeConsulta },
+      { href: '/marcas/colidencias', nome: 'Colidências', Icone: IconeColidencia },
+    ],
+  },
   {
     titulo: 'Marcas',
     Icone: IconeMarcas,
     itens: [
-      { href: '/marcas', nome: 'Processos', Icone: IconeMarcas },
-      { href: '/busca', nome: 'Consulta ao pePI', Icone: IconeConsulta },
-      { href: '/historico', nome: 'Histórico RPI', Icone: IconeHistorico },
-      {
-        href: '/marcas/colidencias',
-        nome: 'Colidências',
-        Icone: IconeColidencia,
-        emBreve:
-          'Em breve — falta persistir o motivo do cruzamento (nome/similaridade) no despacho para dar uma tela própria a essa lista.',
-      },
+      { href: '/marcas/cadastrar', nome: 'Cadastrar Processo', Icone: IconeCadastrar },
+      { href: '/marcas', nome: 'Acompanhar Processo', Icone: IconeAcompanhar },
     ],
   },
   {
     titulo: 'Patentes',
     Icone: IconePatentes,
-    emBreve: 'Em breve — fase futura do roadmap.',
+    itens: [
+      {
+        href: '/patentes/cadastrar',
+        nome: 'Cadastrar Processo',
+        Icone: IconeCadastrar,
+        emBreve: 'Em breve — fase futura do roadmap.',
+      },
+      {
+        href: '/patentes',
+        nome: 'Acompanhar Processo',
+        Icone: IconeAcompanhar,
+        emBreve: 'Em breve — fase futura do roadmap.',
+      },
+    ],
   },
   {
     titulo: 'Desenho Industrial',
@@ -87,6 +108,7 @@ const GRUPOS_PI: GrupoPI[] = [
 const ITENS_COMPARTILHADOS = [
   { href: '/revistas', nome: 'Revistas INPI', Icone: IconeRevistas },
   { href: '/prazos', nome: 'Prazos INPI', Icone: IconePrazos },
+  { href: '/caixa-de-mensagens', nome: 'Caixa de Mensagem', Icone: IconeCaixaMensagem },
 ] as const;
 
 function IconeChevron({ aberto }: { aberto: boolean }) {

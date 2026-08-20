@@ -100,6 +100,102 @@ Correção de um número que circulou aqui antes: o plano Launch do Neon **não 
 virou pay-as-you-go sem mínimo mensal (US$0,35/GB-mês de storage, US$0,106/CU-hora de compute, com
 auto-suspensão). Reconferir antes de decidir, como todo tier citado neste documento.
 
+### 3.1.2 O piso de latência da busca sob demanda, e o caminho pago para reduzi-lo (registrado em 16/08/2026, não implementado)
+
+Medido ao vivo em 16/08/2026 (vários runs reais do `pepi-search.yml`, termo "NATURA", tipo exata):
+a consulta em si contra o pePI levou **5-9s** em todos os testes, mas o job inteiro variou de
+**50s a 2min8s** dependendo do que estava em cache. A diferença inteira é overhead fixo do desenho
+atual, não da automação de navegador — e esse overhead tem piso, não importa quanto se otimize
+*dentro* dele:
+
+| Etapa | Custo típico | Por que não dá pra zerar dentro do GitHub Actions |
+|---|---|---|
+| Fila até um runner pegar o job | alguns segundos, às vezes mais | Não existe "runner reservado" no free tier — é fila compartilhada |
+| `checkout` + `setup-node` + cache do npm | ~10-15s | Ambiente novo a cada run |
+| `npm ci` (ou restaurar `node_modules` cacheado via `actions/cache` + `prisma generate`) | ~10-25s | VM efêmera: nada sobrevive entre runs a não ser o que `actions/cache` explicitamente guarda |
+| Chromium + deps de SO (`actions/cache` do binário + `install-deps` via apt) | ~15-20s com cache do binário quente | `install-deps` reinstala pacote de sistema toda vez — não dá pra cachear apt numa VM que morre no fim do job |
+| **A busca em si** | **5-9s** (medido; o playbook `pepi-scraping-playbook` documenta variação de 20-150s em dias ruins) | Esse é o único número que tem a ver com o INPI, não com o nosso pipeline |
+
+**Tentativa registrada e descartada**: trocar as duas últimas linhas (cache do binário + apt) pelo
+container oficial `mcr.microsoft.com/playwright:v1.62.0-jammy` (que já vem com Chromium e deps de
+SO prontos) parecia eliminar esse custo de vez. **Na prática piorou** — dois runs deram 1min7s e
+2min8s, contra 1min2s da abordagem com cache. Causa: runners hospedados do GitHub **não retêm
+camadas de imagem Docker entre execuções**; cada job baixava a imagem (~1,5GB+) do zero, gastando
+uns 35s de pull que superava o `install-deps` que deveria substituir. Revertido no mesmo dia — ver
+histórico de `pepi-search.yml`/`pepi-monitor.yml`. Não reintroduzir essa ideia sem confirmar que
+esse comportamento de cache de imagem mudou (seria uma mudança do lado do GitHub, não do projeto).
+
+Depois de cache de `node_modules` + cache do binário do Chromium (os dois via `actions/cache`,
+aplicados em 16/08/2026), o melhor resultado medido com as duas caches já quentes foi **50s**. Esse
+é o piso realista **dentro do modelo "cada busca = uma VM nova"** — fila de runner e bootstrap de
+ambiente são inerentes a esse modelo, não bugs de configuração, e não têm mais gordura óbvia pra
+cortar sem sair dele.
+
+#### O que resolveria de verdade: um worker permanente, fora do GitHub Actions
+
+Para chegar perto dos 5-9s *de ponta a ponta* (não só na consulta), o desenho precisaria trocar
+"cada busca abre uma VM do zero" por "existe um processo Node de longa duração, sempre ligado, com
+o Chromium já instalado e pronto para lançar, que recebe o pedido e executa na hora". Isso elimina
+justamente as linhas da tabela acima que hoje dominam o tempo — fila de runner, checkout, install
+de dependências — porque nenhuma delas acontece de novo a cada busca.
+
+**Como isso ficaria, em detalhe:**
+
+- **Onde rodar**: precisa de um host que fique ligado 24/7 (o oposto do GitHub Actions, que só paga
+  CPU quando um job está rodando). Opções, do mais simples ao mais barato:
+  - **VPS pequena e sempre ligada** (DigitalOcean, Hetzner, Contabo — ~US$4-7/mês pelo menor plano
+    com 1GB+ RAM, que é o mínimo confortável pra rodar Chromium headless sem OOM). Mais simples de
+    raciocinar: uma máquina, um processo, `systemd` cuidando de restart. Sem cold start nenhum,
+    sempre.
+  - **Fly.io** — tem `auto_stop_machines`/`auto_start_machines`, que desliga a máquina quando
+    ociosa e liga sob demanda; isso reintroduz um cold start (bem menor que o do GitHub Actions,
+    mas não zero) a menos que se pague para manter `min_machines_running: 1`, o que aproxima o
+    custo do de uma VPS pequena.
+  - **Railway/Render (planos pagos com serviço "always on")** — parecido com VPS gerenciada; nos
+    planos *free* desses provedores o serviço dorme por inatividade, o que anula o ganho (primeira
+    requisição depois de dormir paga cold start de novo). Só serve se for o plano pago com
+    "always on" explicitamente.
+  - Fica fora de cogitação continuar em cima do GitHub Actions ou do Vercel Hobby: nenhum dos dois
+    oferece "processo que fica ligado esperando" nos tiers gratuitos — é a característica que
+    justamente torna os dois gratuitos (Seção 3.1).
+
+- **Como o pedido chegaria até ele**: hoje a API do Next.js dispara `workflow_dispatch` via API REST
+  do GitHub. Com um worker permanente, o caminho mais direto é a API do Next.js chamar um endpoint
+  HTTP exposto pelo próprio worker (`POST /buscar` com termo/tipo/classe), autenticado por um
+  segredo compartilhado (header tipo `Authorization: Bearer <token>`, guardado como variável de
+  ambiente dos dois lados — nunca no banco, mesma regra da Seção 3.2 para a chave do Resend). O
+  worker grava o resultado em `pepi_search_jobs` do mesmo jeito que hoje — o polling do frontend
+  não muda nada.
+- **Ciclo de vida do navegador**: lançar o Chromium **uma vez**, no boot do processo (`chromium.launch()`
+  fica fora do handler de cada busca), e abrir um `browser.newContext()` novo a cada busca — contexto
+  isolado (cookies/sessão próprios), mas sem pagar o custo de subir o processo do Chromium de novo.
+  O login anônimo (link "Continuar...." → aba nova, ver skill `pepi-scraping-playbook`) ainda precisa
+  rodar por busca, porque a sessão do pePI é por contexto — não dá pra reaproveitar sessão entre
+  buscas concorrentes com segurança. **Reiniciar o processo Chromium periodicamente** (ex.: a cada
+  N buscas ou X horas, não só sob demanda) é necessário — processo de navegador de longa duração
+  vaza memória, e isso é o motivo pelo qual esse worker precisa de supervisão operacional que hoje
+  não existe (o GitHub Actions garante uma VM limpa a cada run "de graça"; um worker permanente não
+  tem esse reset automático).
+- **Fila e rate limit continuam obrigatórios**: a skill `pepi-scraping-playbook` já exige
+  concorrência 1 contra o pePI para não ser bloqueado por uso automatizado — um worker permanente
+  naturalmente mantém isso como fila em memória (array/`p-queue` processando um pedido por vez) em
+  vez de depender da falta de paralelismo do GitHub Actions.
+- **Segurança**: hoje o "servidor" só existe pelo tempo de um job (superfície de ataque mínima). Um
+  processo sempre ligado e alcançável pela internet é infraestrutura de verdade — precisa de
+  firewall/allowlist (só a API do Next.js pode chamar), rotação do segredo compartilhado, e alguém
+  olhando se o processo caiu (o "silêncio" de um worker morto é o mesmo modo de falha perigoso já
+  descrito na Seção 3.3 para e-mail: painel dizendo "ativo" enquanto nada funciona).
+- **O que isso NÃO resolve**: a variação da resposta do próprio pePI (20-150s em dias ruins,
+  documentada na skill) é do lado do INPI, não do nosso pipeline — nem um worker perfeitamente
+  quente muda isso. "5-9s" vira o caso típico/bom, não uma garantia.
+
+**Por que não foi implementado agora**: muda a Seção 3 inteira (a linha "Worker de scraping..." da
+tabela de stack deixa de ser 100% GitHub Actions) e quebra a invariante de custo $0/mês que é
+decisão de arquitetura deliberada deste documento, não um detalhe — decidido em 16/08/2026 manter
+$0/mês e aceitar o piso de ~30-40s+consulta descrito acima. Se esse trade-off mudar (por exemplo,
+se a latência virar bloqueador real de uso, não só incômodo), a alavanca é esta seção, não reabrir
+a investigação do zero.
+
 ### 3.2 E-mail: por que Resend e não "cada usuário com seu SMTP" (revisto em 28/07/2026)
 
 A escolha original era Nodemailer com SMTP configurado pelo usuário, herdada do software de
@@ -121,8 +217,23 @@ devolve `EAUTH`, que não diz nada a ele.
   `usuarios.email`).
 - SMTP continua implementado como fallback (`ConfigEmail` em `src/lib/email.ts`) para quem quiser
   servidor próprio e para não ficar refém de um serviço externo.
-- Remetente em **subdomínio dedicado** (ex: `avisos@avisos.trilhafinance.com.br`): isola a
-  reputação de envio do domínio principal.
+- Remetente é o **domínio raiz** (`avisos@trilhafinance.com.br`), não um subdomínio dedicado —
+  revertido em 11/08/2026 (ver nota abaixo). Se um dia o plano do Resend permitir mais de um
+  domínio, reavaliar a volta ao subdomínio pelo motivo original: isolar a reputação de envio do
+  domínio principal.
+
+> **Nota (11/08/2026)**: a intenção original era subdomínio dedicado
+> (`avisos@avisos.trilhafinance.com.br`), mas o **plano gratuito do Resend só permite 1 domínio por
+> conta**, e a única vaga já estava ocupada por `trilhafinance.com.br` (cadastrado em 05/08/2026,
+> nunca verificado). Cadastrar o subdomínio como segundo domínio foi recusado pela API
+> (`"Your plan includes 1 domain. Upgrade to add more."`). Causa raiz de um alerta que não saiu: o
+> `EMAIL_REMETENTE` apontava pro subdomínio, mas nenhum domínio verificado no Resend cobria esse
+> endereço — Resend nunca ia aceitar o envio, independente de DNS. Corrigido trocando
+> `EMAIL_REMETENTE` para `avisos@trilhafinance.com.br` (secret do GitHub Actions e `.env` locais
+> atualizados; **falta atualizar a Environment Variable equivalente no Vercel**, ver Seção 3.3) e
+> mantendo o domínio raiz como o único cadastrado. DNS (registros DKIM/SPF que o Resend pede)
+> segue como responsabilidade do operador — reconferir status em resend.com/domains antes de
+> assumir que está verificado.
 
 Por que isso importa mais aqui que num app comum: **alerta de prazo que cai em spam equivale a
 alerta não enviado**, e o sistema inteiro existe para evitar prazo perdido. Deliverability é
@@ -179,13 +290,14 @@ registrar qualquer número aqui.
 | `usuarios` | Conta/dono da configuração (escritório ou usuário único). |
 | `clientes` | Pessoas/empresas para quem uma marca é monitorada; e-mail e WhatsApp próprios. Pode ser descartada se o uso for só pessoal. |
 | `marcas_monitoradas` | Nome, processo, classe NCL, tipo de busca, similaridade on/off + threshold, fonte de dados (`rpi` ou `scraping`), cliente vinculado, eventos que disparam alerta. Só na fonte `scraping`: `ultimo_snapshot_pepi` (retrato "processo → situação" da última consulta) e `verificado_em` — é a diferença entre retratos que caracteriza movimentação nova nessa fonte. |
-| `despachos` | Movimentação capturada: marca relacionada, edição da RPI, data de publicação, código e texto do despacho. `alerta_pendente` é a fila de notificação preenchida pelo job de verificação (Fase 3) e consumida pelo envio (Fase 6). Despacho vindo do pePI tem `edicao_rpi_id` nulo e o código sintético `PEPI-SITUACAO` (que não existe na tabela do INPI, e por isso nunca alimenta o cálculo de prazos da Fase 5). |
+| `despachos` | Movimentação capturada: marca relacionada, edição da RPI, data de publicação, código e texto do despacho. `alerta_pendente` é a fila de notificação preenchida pelo job de verificação (Fase 3) e consumida pelo envio (Fase 6). Despacho vindo do pePI tem `edicao_rpi_id` nulo e o código sintético `PEPI-SITUACAO` (que não existe na tabela do INPI, e por isso nunca alimenta o cálculo de prazos da Fase 5). `motivo_vinculo`/`similaridade_score` guardam como o despacho casou com a marca (`processo`/`nome`/`similaridade`) — persistido no cruzamento desde 16/08/2026 para a tela **Colidências** (`/marcas/colidencias`, só `motivo_vinculo = similaridade`) não precisar recomputar o cruzamento inteiro a cada carregamento; despacho vinculado antes dessa data tem os dois campos nulos até rodar `npm run ingest:rpi -- --recalcular-motivo`. |
 | `prazos` | Derivado de um despacho: tipo de prazo (slug de `src/lib/prazos.ts`), data-limite, status. Único por `(despacho, tipo)` — re-rodar a ingestão recalcula em vez de duplicar. Só `cumprido` é gravado pelo usuário; `pendente`/`vencido` saem da data na leitura, sem job diário. Regras validadas contra a LPI e o Manual de Marcas — ver `references/despacho-codes.md` na skill `rpi-ingestion-despachos`. |
 | `edicoes_rpi` | Cache local de cada edição já processada — número, data de publicação, timestamp de processamento. É também o catálogo da seção **Revistas INPI** (`/revistas`), e por isso **nunca** é apagado pela limpeza da janela móvel (Seção 3.1.1): o histórico de revistas desde jan/2026 continua completo e baixável mesmo quando os despachos antigos saem do banco. |
 | `templates` | Configuração de marca própria por usuário: cores, logo, textos de relatório e e-mail, assinatura. |
 | `configuracoes_alerta` | Canais habilitados por usuário e parâmetros de delay/intervalo de envio. |
 | `logs_execucao` | Registro de cada rodada de busca/monitoramento, para auditoria e depuração. |
 | `pepi_search_jobs` | Job de busca ao vivo no pePI: criado `pendente` pela API, executado pelo workflow `pepi-search.yml`, consumido por polling do frontend (termo, tipo, status, etapa, resultado JSON). |
+| `pepi_detalhe_jobs` | Job de detalhe de um processo pePI (clique num processo do resultado da busca): mesmo padrão de `pepi_search_jobs`, executado pelo workflow `pepi-detalhe.yml`. A API reaproveita um job `sucesso` do mesmo `codPedido` de até 24h atrás em vez de disparar um novo workflow a cada clique. Sem imagem de protocolo no resultado — só aparece autenticado como titular, fora do alcance da sessão anônima (ver skill `pepi-scraping-playbook`). |
 
 Ao criar/alterar migrations, mantenha este quadro atualizado — ele é a referência rápida antes de abrir o schema do Prisma.
 

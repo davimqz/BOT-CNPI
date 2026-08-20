@@ -36,6 +36,15 @@ enum StatusJobBusca {
   erro
 }
 
+// Como um despacho chegou até a marca vinculada (Fase 4) — espelha
+// MotivoCruzamento de src/lib/verificacao.ts. `similaridade` é colidência:
+// marca de TERCEIRO parecida com a monitorada, nunca movimentação própria.
+enum MotivoVinculo {
+  processo
+  nome
+  similaridade
+}
+
 // Conta/dono da configuração (usuário único nesta versão; multiusuário só na Fase 8).
 model Usuario {
   id        String   @id @default(cuid())
@@ -118,6 +127,15 @@ model Despacho {
   // monitorada E o código está entre os eventos escolhidos por ela. O envio da
   // Fase 6 consome esta fila e zera a flag — nunca reprocessar a edição inteira.
   alertaPendente    Boolean  @default(false) @map("alerta_pendente")
+  // Persistido no cruzamento (src/lib/verificacao.ts::Cruzamento) — antes disso
+  // o motivo era recomputado a cada leitura. Nulo enquanto marcaId for nulo, ou
+  // em despacho vinculado antes desta coluna existir (backfill: `npm run
+  // ingest:rpi -- --recalcular-motivo`). A tela de Colidências (/marcas/colidencias)
+  // é só `motivoVinculo = similaridade`.
+  motivoVinculo     MotivoVinculo? @map("motivo_vinculo")
+  // Percentual 0-100 da comparação nome a nome; só presente quando
+  // motivoVinculo = similaridade (`casaPorSimilaridade` em verificacao.ts).
+  similaridadeScore Int?     @map("similaridade_score")
   criadoEm       DateTime @default(now()) @map("criado_em")
 
   marca     MarcaMonitorada? @relation(fields: [marcaId], references: [id])
@@ -127,6 +145,7 @@ model Despacho {
   @@index([processo])
   @@index([codigo])
   @@index([marcaId, alertaPendente])
+  @@index([motivoVinculo])
   @@map("despachos")
 }
 
@@ -255,6 +274,33 @@ model PepiSearchJob {
 
   @@index([status, criadoEm])
   @@map("pepi_search_jobs")
+}
+
+// Job de detalhe de processo pePI: a API cria a linha como `pendente` ao clicar
+// num processo do resultado da busca, dispara pepi-detalhe.yml via
+// workflow_dispatch passando CodPedido, e o worker grava o resultado; o
+// frontend faz polling (mesmo padrão de PepiSearchJob). `codPedido` é o
+// identificador de sessão que o pePI usa na URL de detalhe
+// (Action=detail&CodPedido=N) — capturado no resultado da busca por marca.
+// Sem campo de imagem do protocolo: só aparece autenticado como titular do
+// processo, fora do alcance da sessão anônima usada aqui (ver skill
+// pepi-scraping-playbook).
+model PepiDetalheJob {
+  id           String         @id @default(cuid())
+  codPedido    String         @map("cod_pedido")
+  processo     String
+  status       StatusJobBusca @default(pendente)
+  etapa        String?
+  resultado    Json?
+  erro         String?
+  criadoEm     DateTime       @default(now()) @map("criado_em")
+  finalizadoEm DateTime?      @map("finalizado_em")
+
+  @@index([status, criadoEm])
+  // Reaproveitar um job recente bem-sucedido do mesmo processo em vez de
+  // disparar um novo workflow a cada clique (rate limit contra o pePI).
+  @@index([codPedido, status, finalizadoEm])
+  @@map("pepi_detalhe_jobs")
 }
 
 // Registro de cada rodada de busca/monitoramento, para auditoria e depuração.

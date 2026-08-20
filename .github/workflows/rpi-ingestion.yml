@@ -4,11 +4,16 @@ name: Ingestão RPI
 
 on:
   schedule:
-    # A RPI é publicada toda terça, mas a infraestrutura do INPI costuma ficar
-    # instável na manhã da publicação (visto em 28/07/2026: site inteiro atrás do
-    # firewall com 403). Três janelas — a ingestão é idempotente, rodada extra não
-    # grava nada em duplicidade.
+    # A RPI parece ficar disponível no servidor de madrugada, não às 09h: nas
+    # edições 2899/2900 a janela das 09:00 BRT já baixou de primeira (sem 404),
+    # e um concorrente ("Marca Acompanhada") notificou o usuário sobre a mesma
+    # marca às 01h30 da terça (11/08/2026) — o que só bate com "checar antes do
+    # pico de tráfego da manhã". A infraestrutura do INPI costuma ficar instável
+    # justo nessa janela da manhã (visto em 28/07: 403; em 11/08: 503 persistente
+    # até depois das 09h). Quatro janelas — a ingestão é idempotente, rodada
+    # extra não grava nada em duplicidade.
     # Gotcha: o GitHub desativa `schedule` em repositórios sem atividade há 60+ dias.
+    - cron: '0 4 * * 2'  # terça 01:00 BRT — tenta antes do pico de tráfego da manhã
     - cron: '0 12 * * 2' # terça 09:00 BRT
     - cron: '0 17 * * 2' # terça 14:00 BRT
     - cron: '0 12 * * 3' # quarta 09:00 BRT (rede de segurança)

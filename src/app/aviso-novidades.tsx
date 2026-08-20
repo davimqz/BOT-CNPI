@@ -115,8 +115,8 @@ export function AvisoNovidades({ inicial }: { inicial: NovidadesUI | null }) {
         <Link href="/prazos" className="underline opacity-80 hover:opacity-100">
           Ver prazos
         </Link>
-        <Link href="/historico" className="underline opacity-80 hover:opacity-100">
-          Ver histórico
+        <Link href="/caixa-de-mensagens" className="underline opacity-80 hover:opacity-100">
+          Ver caixa de mensagem
         </Link>
       </footer>
     </aside>

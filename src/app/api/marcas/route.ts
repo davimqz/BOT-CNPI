@@ -3,15 +3,39 @@ import { prisma } from '@/lib/db';
 import { getUsuarioUnico } from '@/lib/usuario';
 import { validarMarca } from '@/lib/marcas';
 
+// Códigos IPAS de "publicação de pedido" (roadmap-marca.ts, fase "pedido em
+// andamento") — é o despacho que carrega a data de prioridade exibida na
+// listagem. IPAS756 é o mesmo evento para designação (Protocolo de Madri).
+const CODIGOS_PUBLICACAO_PEDIDO = ['IPAS009', 'IPAS756'];
+
 // Lista as marcas monitoradas + clientes disponíveis para vínculo (Fase 3).
 export async function GET() {
-  const [marcas, clientes] = await Promise.all([
+  const [marcasBrutas, clientes] = await Promise.all([
     prisma.marcaMonitorada.findMany({
-      include: { cliente: { select: { id: true, nome: true } } },
+      include: {
+        cliente: { select: { id: true, nome: true } },
+        despachos: {
+          select: { codigo: true, dataPublicacao: true, edicaoRpi: { select: { numero: true } } },
+          orderBy: { dataPublicacao: 'asc' },
+        },
+      },
       orderBy: { criadoEm: 'desc' },
     }),
     prisma.cliente.findMany({ orderBy: { nome: 'asc' }, select: { id: true, nome: true } }),
   ]);
+
+  // "Prioridade" e "RPI Atual" das colunas da listagem são derivadas dos
+  // despachos, não persistidas — CLAUDE.md Seção 4 não tem coluna própria
+  // para isso em marcas_monitoradas.
+  const marcas = marcasBrutas.map(({ despachos, ...marca }) => {
+    const publicacaoPedido = despachos.find((d) => CODIGOS_PUBLICACAO_PEDIDO.includes(d.codigo));
+    const rpiAtual = despachos.reduce<number | null>((maior, d) => {
+      const numero = d.edicaoRpi?.numero;
+      return numero != null && (maior === null || numero > maior) ? numero : maior;
+    }, null);
+    return { ...marca, prioridade: publicacaoPedido?.dataPublicacao ?? null, rpiAtual };
+  });
+
   return NextResponse.json({ marcas, clientes });
 }
 
