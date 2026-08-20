@@ -148,17 +148,21 @@ export default function DetalheProcessoPage({
         ← Voltar à busca
       </button>
 
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">
-            Processo <span className="font-mono">{processoExibido}</span>
-          </h1>
-          {detalhe?.marca && <p className="mt-1 text-sm opacity-70">{detalhe.marca}</p>}
-        </div>
-        {detalhe?.situacao && (
-          <span className="rounded bg-black/10 px-2 py-1 text-sm dark:bg-white/10">{detalhe.situacao}</span>
-        )}
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold">
+          Processo <span className="font-mono">{processoExibido}</span>
+        </h1>
+        {detalhe?.marca && <p className="mt-1 text-sm opacity-70">{detalhe.marca}</p>}
       </header>
+
+      {detalhe?.situacao && (
+        <div className="mb-6 rounded border border-black/10 bg-black/[0.03] px-4 py-3 dark:border-white/15 dark:bg-white/5">
+          <span className="block text-xs font-medium uppercase tracking-wide opacity-60">
+            Situação atual
+          </span>
+          <span className="text-base font-medium">{detalhe.situacao}</span>
+        </div>
+      )}
 
       {carregando && (
         <div className="mb-4 rounded border border-black/10 px-4 py-3 text-sm dark:border-white/15">
@@ -304,7 +308,12 @@ export default function DetalheProcessoPage({
                 <thead className="bg-black/5 text-left dark:bg-white/10">
                   <tr>
                     <th className="px-3 py-2 font-medium">Pgo</th>
-                    <th className="px-3 py-2 font-medium">Protocolo</th>
+                    <th
+                      className="px-3 py-2 font-medium"
+                      title="Nº do protocolo da petição. O PDF do Pedido de Registro (coluna Img do site do INPI) só fica disponível autenticado como titular do processo — não é possível abri-lo aqui."
+                    >
+                      Protocolo
+                    </th>
                     <th className="px-3 py-2 font-medium">Data</th>
                     <th className="px-3 py-2 font-medium">Serviço</th>
                     <th className="px-3 py-2 font-medium">Cliente</th>
@@ -315,7 +324,9 @@ export default function DetalheProcessoPage({
                   {detalhe.peticoes.map((p, i) => (
                     <tr key={i} className="border-t border-black/5 align-top dark:border-white/10">
                       <td className="px-3 py-2">{celula(p.pgo)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 font-mono">{celula(p.protocolo)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 font-mono font-semibold select-all">
+                        {celula(p.protocolo)}
+                      </td>
                       <td className="whitespace-nowrap px-3 py-2">{celula(p.data)}</td>
                       <td className="px-3 py-2">{celula(p.servico)}</td>
                       <td className="max-w-64 px-3 py-2" title={p.cliente ?? undefined}>
@@ -336,6 +347,12 @@ export default function DetalheProcessoPage({
                 </tbody>
               </table>
             </div>
+            {detalhe.peticoes.length > 0 && (
+              <p className="mt-3 text-xs opacity-60">
+                O PDF do Pedido de Registro (coluna Img do site do INPI) só fica disponível autenticado
+                como titular do processo — aqui mostramos apenas o nº do protocolo.
+              </p>
+            )}
           </section>
 
           <section>
