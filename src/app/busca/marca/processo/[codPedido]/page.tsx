@@ -1,8 +1,7 @@
 'use client';
 
 import { use, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 // Detalhe de um processo pePI, aberto ao clicar num processo no resultado da
 // busca (src/app/busca/marca/page.tsx). Mesmo modelo assíncrono da busca: a
@@ -72,6 +71,7 @@ export default function DetalheProcessoPage({
   params: Promise<{ codPedido: string }>;
 }) {
   const { codPedido } = use(params);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const processoQuery = searchParams.get('processo') ?? '';
 
@@ -140,9 +140,13 @@ export default function DetalheProcessoPage({
 
   return (
     <div className="mx-auto w-full max-w-6xl flex-1 p-6">
-      <Link href="/busca/marca" className="mb-4 inline-block text-sm underline opacity-70 hover:opacity-100">
+      <button
+        type="button"
+        onClick={() => router.back()}
+        className="mb-4 inline-block text-sm underline opacity-70 hover:opacity-100"
+      >
         ← Voltar à busca
-      </Link>
+      </button>
 
       <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
